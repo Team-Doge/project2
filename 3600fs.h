@@ -80,7 +80,7 @@ typedef struct inode_t {
 
 typedef struct free_t {
     blocknum next;
-    char junk[508];
+    char junk[504];
 } freeb;
 
 #endif
