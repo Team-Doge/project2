@@ -48,15 +48,17 @@
  *
  */
 static void* vfs_mount(struct fuse_conn_info *conn) {
-  fprintf(stderr, "vfs_mount called\n");
+    fprintf(stderr, "vfs_mount called\n");
 
-  // Do not touch or move this code; connects the disk
-  dconnect();
+    // Do not touch or move this code; connects the disk
+    dconnect();
 
-  /* 3600: YOU SHOULD ADD CODE HERE TO CHECK THE CONSISTENCY OF YOUR DISK
-           AND LOAD ANY DATA STRUCTURES INTO MEMORY */
+    /* 3600: YOU SHOULD ADD CODE HERE TO CHECK THE CONSISTENCY OF YOUR DISK
+       AND LOAD ANY DATA STRUCTURES INTO MEMORY */
 
-  return NULL;
+
+
+    return NULL;
 }
 
 /*
@@ -64,14 +66,14 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
  *
  */
 static void vfs_unmount (void *private_data) {
-  fprintf(stderr, "vfs_unmount called\n");
+    fprintf(stderr, "vfs_unmount called\n");
 
-  /* 3600: YOU SHOULD ADD CODE HERE TO MAKE SURE YOUR ON-DISK STRUCTURES
-           ARE IN-SYNC BEFORE THE DISK IS UNMOUNTED (ONLY NECESSARY IF YOU
-           KEEP DATA CACHED THAT'S NOT ON DISK */
+    /* 3600: YOU SHOULD ADD CODE HERE TO MAKE SURE YOUR ON-DISK STRUCTURES
+       ARE IN-SYNC BEFORE THE DISK IS UNMOUNTED (ONLY NECESSARY IF YOU
+       KEEP DATA CACHED THAT'S NOT ON DISK */
 
-  // Do not touch or move this code; unconnects the disk
-  dunconnect();
+    // Do not touch or move this code; unconnects the disk
+    dunconnect();
 }
 
 /* 
@@ -86,31 +88,31 @@ static void vfs_unmount (void *private_data) {
  *
  */
 static int vfs_getattr(const char *path, struct stat *stbuf) {
-  fprintf(stderr, "vfs_getattr called\n");
+    fprintf(stderr, "vfs_getattr called\n");
 
-  // Do not mess with this code 
-  stbuf->st_nlink = 1; // hard links
-  stbuf->st_rdev  = 0;
-  stbuf->st_blksize = BLOCKSIZE;
+    // Do not mess with this code 
+    stbuf->st_nlink = 1; // hard links
+    stbuf->st_rdev  = 0;
+    stbuf->st_blksize = BLOCKSIZE;
 
-  /* 3600: YOU MUST UNCOMMENT BELOW AND IMPLEMENT THIS CORRECTLY */
-  
-  /*
-  if (The path represents the root directory)
-    stbuf->st_mode  = 0777 | S_IFDIR;
-  else 
-    stbuf->st_mode  = <<file mode>> | S_IFREG;
+    /* 3600: YOU MUST UNCOMMENT BELOW AND IMPLEMENT THIS CORRECTLY */
 
-  stbuf->st_uid     = // file uid
-  stbuf->st_gid     = // file gid
-  stbuf->st_atime   = // access time 
-  stbuf->st_mtime   = // modify time
-  stbuf->st_ctime   = // create time
-  stbuf->st_size    = // file size
-  stbuf->st_blocks  = // file size in blocks
-    */
+    /*
+       if (The path represents the root directory)
+       stbuf->st_mode  = 0777 | S_IFDIR;
+       else 
+       stbuf->st_mode  = <<file mode>> | S_IFREG;
 
-  return 0;
+       stbuf->st_uid     = // file uid
+       stbuf->st_gid     = // file gid
+       stbuf->st_atime   = // access time 
+       stbuf->st_mtime   = // modify time
+       stbuf->st_ctime   = // create time
+       stbuf->st_size    = // file size
+       stbuf->st_blocks  = // file size in blocks
+     */
+
+    return 0;
 }
 
 /*
@@ -125,10 +127,10 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
  * NOTE: YOU CAN IGNORE THIS METHOD, UNLESS YOU ARE COMPLETING THE 
  *       EXTRA CREDIT PORTION OF THE PROJECT.  IF SO, YOU SHOULD
  *       UN-COMMENT THIS METHOD.
-static int vfs_mkdir(const char *path, mode_t mode) {
+ static int vfs_mkdir(const char *path, mode_t mode) {
 
-  return -1;
-} */
+ return -1;
+ } */
 
 /** Read directory
  *
@@ -153,7 +155,7 @@ static int vfs_mkdir(const char *path, mode_t mode) {
  *
  */
 static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-                       off_t offset, struct fuse_file_info *fi)
+        off_t offset, struct fuse_file_info *fi)
 {
 
     return 0;
@@ -182,7 +184,7 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
  *
  */
 static int vfs_read(const char *path, char *buf, size_t size, off_t offset,
-                    struct fuse_file_info *fi)
+        struct fuse_file_info *fi)
 {
 
     return 0;
@@ -200,13 +202,13 @@ static int vfs_read(const char *path, char *buf, size_t size, off_t offset,
  * HINT: Ignore 'fi'
  */
 static int vfs_write(const char *path, const char *buf, size_t size,
-                     off_t offset, struct fuse_file_info *fi)
+        off_t offset, struct fuse_file_info *fi)
 {
 
-  /* 3600: NOTE THAT IF THE OFFSET+SIZE GOES OFF THE END OF THE FILE, YOU
-           MAY HAVE TO EXTEND THE FILE (ALLOCATE MORE BLOCKS TO IT). */
+    /* 3600: NOTE THAT IF THE OFFSET+SIZE GOES OFF THE END OF THE FILE, YOU
+       MAY HAVE TO EXTEND THE FILE (ALLOCATE MORE BLOCKS TO IT). */
 
-  return 0;
+    return 0;
 }
 
 /**
@@ -216,8 +218,8 @@ static int vfs_write(const char *path, const char *buf, size_t size,
 static int vfs_delete(const char *path)
 {
 
-  /* 3600: NOTE THAT THE BLOCKS CORRESPONDING TO THE FILE SHOULD BE MARKED
-           AS FREE, AND YOU SHOULD MAKE THEM AVAILABLE TO BE USED WITH OTHER FILES */
+    /* 3600: NOTE THAT THE BLOCKS CORRESPONDING TO THE FILE SHOULD BE MARKED
+       AS FREE, AND YOU SHOULD MAKE THEM AVAILABLE TO BE USED WITH OTHER FILES */
 
     return 0;
 }
@@ -280,8 +282,8 @@ static int vfs_utimens(const char *file, const struct timespec ts[2])
 static int vfs_truncate(const char *file, off_t offset)
 {
 
-  /* 3600: NOTE THAT ANY BLOCKS FREED BY THIS OPERATION SHOULD
-           BE AVAILABLE FOR OTHER FILES TO USE. */
+    /* 3600: NOTE THAT ANY BLOCKS FREED BY THIS OPERATION SHOULD
+       BE AVAILABLE FOR OTHER FILES TO USE. */
 
     return 0;
 }
@@ -315,8 +317,8 @@ int main(int argc, char *argv[]) {
     /* Do not modify this function */
     umask(0);
     if ((argc < 4) || (strcmp("-s", argv[1])) || (strcmp("-d", argv[2]))) {
-      printf("Usage: ./3600fs -s -d <dir>\n");
-      exit(-1);
+        printf("Usage: ./3600fs -s -d <dir>\n");
+        exit(-1);
     }
     return fuse_main(argc, argv, &vfs_oper, NULL);
 }
