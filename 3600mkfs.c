@@ -57,11 +57,13 @@ void myformat(int size) {
     myvcb.blocksize = BLOCKSIZE;
     myvcb.magic = 17;
     myvcb.root = blocks[1];
+    myvcb.root.valid = 1;
     myvcb.free = blocks[3];
     strcpy(myvcb.name, "Josh and Mich's excellent file system.");
 
     dnode root;
     root.direct[0] = blocks[2];
+    root.direct[0].valid = 1;
     root.size = sizeof(blocknum);
     root.user = getuid();
     root.group = getgid();
@@ -78,11 +80,13 @@ void myformat(int size) {
     direntry dot;
     dot.type = 'd';
     dot.block = blocks[1];
+    dot.block.valid = 1;
     strcpy(dot.name, ".");
 
     direntry dotdot;
     dotdot.type = 'd';
     dotdot.block = blocks[1];
+    dotdot.block.valid = 1;
     strcpy(dotdot.name, "..");
 
     dirent root_dir;

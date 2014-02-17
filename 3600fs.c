@@ -260,8 +260,15 @@ static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         for (int j = 0; j < 8; j++) {
             direntry entry = dir.entries[j];
             
-            if (entry.block.block != 1) {
-                continue;
+            if (entry.block.valid != 1) {
+                printf("INVALID BLOCK READ. NO MORE TO READ.");
+                return 0;
+            }
+            
+            char* name = entry.name;
+            if (filler(buf, name, NULL, 0) != 0) {
+                printf("ERROR WITH FILLER\n");
+                return -1;
             }
 
             printf("\nVALID ENTRY: %s\n", entry.name);
