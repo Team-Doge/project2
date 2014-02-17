@@ -36,7 +36,7 @@ void myformat(int size) {
     for (int i = 0; i < size; i++) {
         blocknum b;
         b.block = i;
-        b.valid = 1;
+        b.valid = 0;
         blocks[i] = b;
     }
 
@@ -46,7 +46,7 @@ void myformat(int size) {
         blocknum b = blocks[i];
 
         if ((i + 1) == size) {
-            b.valid = 0;
+            b.valid = 1;
         }
 
         f.next = b;
@@ -88,6 +88,15 @@ void myformat(int size) {
     dirent root_dir;
     root_dir.entries[0] = dot;
     root_dir.entries[1] = dotdot;
+
+    direntry empty;
+    empty.type = '\0';
+    empty.block = blocks[size];
+    strcpy(empty.name, "");
+
+    for (int i = 2; i < 8; i++) {
+        root_dir.entries[i] = empty;
+    }
 
     //printf("The size of vcb is: %d\n", (int) sizeof(myvcb));
 

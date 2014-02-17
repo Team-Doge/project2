@@ -215,6 +215,64 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
 static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         off_t offset, struct fuse_file_info *fi)
 {
+    printf("\n\n\n\n");
+    printf("Path to be read: '%s'\n", path);
+    printf("Offset: %d\n", offset);
+
+    if (strcmp("/", path) != 0) {
+        perror("ERROR: Not listing '/'.\n");
+        return -1;
+    }
+
+    // Read in the root dnode
+    char* root_tmp = malloc(sizeof(dnode));
+    if (dread(1, root_tmp) < 0) {
+        perror("Error reading root directory from disk.");
+    }
+    dnode root;
+    memcpy(&root, root_tmp, sizeof(dnode));
+
+    // Step through the direct blocks
+    for (int i = 0; i < 54; i++) {
+        printf("GETTING FILES FROM DIRECTORY.\n");
+        printf("Reading direct block %d\n", i);
+
+        blocknum b = root.direct[i];
+        printf("Checking validity of direct block %d...\n", i);
+        if (b.valid == 0) {
+            printf("\tDirect block %d was invalid.\n", i);
+            continue;
+        }
+        printf("\tDirect block %d was valid!\n", i);
+
+        int bnum = b.block;
+        printf("Block number to read data from: %d\n", bnum);
+        char* dir_tmp = malloc(sizeof(dirent));
+        int result = dread(bnum, dir_tmp);
+        if (result < 0) {
+            printf("\n\nERROR: Could not read blocknum %d from disk.\n", bnum);
+            return -1;
+        }
+
+        dirent dir;
+        memcpy(&dir, dir_tmp, sizeof(dirent));
+
+        for (int j = 0; j < 8; j++) {
+            direntry entry = dir.entries[j];
+            
+            if (entry.block.block != 1) {
+                continue;
+            }
+
+            printf("\nVALID ENTRY: %s\n", entry.name);
+        }
+    }
+
+    // Step through the single-layer indirection
+    // TODO
+
+    // Step through the double-layer indirection
+    // TODO
 
     return 0;
 }
