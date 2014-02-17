@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <time.h>
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -60,6 +62,18 @@ void myformat(int size) {
 
     dnode root;
     root.direct[0] = blocks[2];
+    root.size = sizeof(blocknum);
+    root.user = getuid();
+    root.group = getgid();
+    root.mode = 0777;
+    
+    struct timespec current_time;
+    if ((clock_gettime(CLOCK_REALTIME, &current_time)) != 0) {
+        printf("ERROR: Cannot get time. \n");
+    }
+    root.access_time = current_time;
+    root.modify_time = current_time;
+    root.create_time = current_time;
 
     direntry dot;
     dot.type = 'd';
@@ -81,7 +95,7 @@ void myformat(int size) {
     char* vcb_tmp = malloc(sizeof(myvcb));
     memcpy(vcb_tmp, &myvcb, sizeof(myvcb));
     if (dwrite(0, vcb_tmp) < 0) {
-        perror("Error writing vcb to disk.");
+        perror("ERROR: Could not write vcb to disk.\n");
     }
 
     free(vcb_tmp);

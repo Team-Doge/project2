@@ -56,7 +56,49 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
     /* 3600: YOU SHOULD ADD CODE HERE TO CHECK THE CONSISTENCY OF YOUR DISK
        AND LOAD ANY DATA STRUCTURES INTO MEMORY */
 
+    // Read in the VCB
+    char* vcb_tmp = malloc(sizeof(vcb));
+    if (dread(0, vcb_tmp) < 0) {
+        perror("Error reading vcb from disk.");
+    }
 
+    // Read in the root dnode
+    char* root_tmp = malloc(sizeof(dnode));
+    if (dread(1, root_tmp) < 0) {
+        perror("Error reading root directory from disk.");
+    }
+
+    // Read in the root directory entries
+    char* root_ent_tmp = malloc(sizeof(dirent));
+    if (dread(2, root_ent_tmp) < 0) {
+        perror("Error reading root directory entries from disk.");
+    }
+
+    printf("\n\n\n******************\n   MOUNTING DISK   \n*******************\n");  
+
+    printf("*** VCB INFO ***\n");
+    vcb myvcb;
+    memcpy(&myvcb, vcb_tmp, sizeof(vcb));
+
+    printf("Magic number: %d\n", myvcb.magic);
+    printf("Block size: %d\n", myvcb.blocksize);
+    printf("Root:\n\tBlock: %d\n\tvalid: %d\n", myvcb.root.block, myvcb.root.valid);
+    printf("Free:\n\tBlock: %d\n\tvalid: %d\n", myvcb.free.block, myvcb.free.valid);
+
+    printf("\n*** ROOT INFO ***\n");
+    dnode root;
+    memcpy(&root, root_tmp, sizeof(dnode));
+
+    printf("User id: %d\n", root.user);
+    printf("Group id: %d\n", root.group);
+    printf("Mode: %d\n", root.mode);
+
+    // Checking times...?
+    printf("Create time: %lld.%.9ld\n", (long long)root.create_time.tv_sec, root.create_time.tv_nsec);
+    printf("Modify time: %lld.%.9ld\n", (long long)root.modify_time.tv_sec, root.modify_time.tv_nsec);
+    printf("Access time: %lld.%.9ld\n", (long long)root.access_time.tv_sec, root.access_time.tv_nsec);
+
+    printf("\n\n\n\n\n\n\n\n\n");
 
     return NULL;
 }
@@ -96,7 +138,12 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
     stbuf->st_blksize = BLOCKSIZE;
 
     /* 3600: YOU MUST UNCOMMENT BELOW AND IMPLEMENT THIS CORRECTLY */
-
+    if (strcmp(path, "/") == 0) {
+        printf("\nSUCCESS: Yay we are in the root directory!\n");
+        stbuf->st_mode = 0777 | S_IFDIR;
+    } else {
+        printf("\nSUCCESS: We are in the directory: %s\n", path);
+    }
     /*
        if (The path represents the root directory)
        stbuf->st_mode  = 0777 | S_IFDIR;
