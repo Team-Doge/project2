@@ -69,8 +69,8 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
     }
 
     // Read in the root directory entries
-    char* root_ent_tmp = malloc(sizeof(dirent));
-    if (dread(2, root_ent_tmp) < 0) {
+    char* root_dir_tmp = malloc(sizeof(dirent));
+    if (dread(2, root_dir_tmp) < 0) {
         perror("Error reading root directory entries from disk.");
     }
 
@@ -85,7 +85,7 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
     printf("Root:\n\tBlock: %d\n\tvalid: %d\n", myvcb.root.block, myvcb.root.valid);
     printf("Free:\n\tBlock: %d\n\tvalid: %d\n", myvcb.free.block, myvcb.free.valid);
 
-    printf("\n*** ROOT INFO ***\n");
+    printf("\n\n*** ROOT INFO ***\n");
     dnode root;
     memcpy(&root, root_tmp, sizeof(dnode));
 
@@ -93,10 +93,21 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
     printf("Group id: %d\n", root.group);
     printf("Mode: %d\n", root.mode);
 
-    // Checking times...?
     printf("Create time: %lld.%.9ld\n", (long long)root.create_time.tv_sec, root.create_time.tv_nsec);
     printf("Modify time: %lld.%.9ld\n", (long long)root.modify_time.tv_sec, root.modify_time.tv_nsec);
     printf("Access time: %lld.%.9ld\n", (long long)root.access_time.tv_sec, root.access_time.tv_nsec);
+
+    printf("\nFirst direct block:\n\tBlock: %d\n\tValid: %d\n", root.direct[0].block, root.direct[0].valid);
+
+    printf("\n\n*** ROOT DIRECTORY INFO ***\n");
+    dirent root_dir;
+    memcpy(&root_dir, root_dir_tmp, sizeof(dirent));
+
+    printf("First direntry:\n\tName: %s\n\tType: %c\n", root_dir.entries[0].name, root_dir.entries[0].type);
+    printf("\tBlocknum:\n\t\tBlock: %d\n\t\tValid: %d\n", root_dir.entries[0].block.block, root_dir.entries[0].block.valid);
+
+    printf("Second direntry:\n\tName: %s\n\tType: %c\n", root_dir.entries[1].name, root_dir.entries[1].type);
+    printf("\tBlocknum:\n\t\tBlock: %d\n\t\tValid: %d\n", root_dir.entries[1].block.block, root_dir.entries[1].block.valid);
 
     printf("\n\n\n\n\n\n\n\n\n");
 

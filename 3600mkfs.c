@@ -82,14 +82,15 @@ void myformat(int size) {
 
     direntry dotdot;
     dotdot.type = 'd';
-    dot.block = blocks[1];
-    strcpy(dot.name, "..");
+    dotdot.block = blocks[1];
+    strcpy(dotdot.name, "..");
 
     dirent root_dir;
     root_dir.entries[0] = dot;
     root_dir.entries[1] = dotdot;
 
     //printf("The size of vcb is: %d\n", (int) sizeof(myvcb));
+
 
     // Write the vcb to memory at block 0
     char* vcb_tmp = malloc(sizeof(myvcb));
