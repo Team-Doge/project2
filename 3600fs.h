@@ -10,7 +10,7 @@
 
 // The number of the block and if it is valid (written to) or not
 typedef struct blocknum_t {
-    int block;
+    int index;
     int valid;
 } blocknum;
 

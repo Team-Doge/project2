@@ -35,7 +35,7 @@ void myformat(int size) {
 
     for (int i = 0; i < size; i++) {
         blocknum b;
-        b.block = i;
+        b.index = i;
         b.valid = 0;
         blocks[i] = b;
     }
