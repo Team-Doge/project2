@@ -29,6 +29,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <assert.h>
+#include <stdbool.h>
 #include <sys/statfs.h>
 
 #ifdef HAVE_SETXATTR
@@ -37,6 +38,12 @@
 
 #include "3600fs.h"
 #include "disk.h"
+
+
+// Global variables
+vcb inode_vcb;
+dnode root;
+dirent root_dir;
 
 /*
  * Initialize filesystem. Read in file system metadata and initialize
@@ -77,16 +84,14 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
     printf("\n\n\n******************\n   MOUNTING DISK   \n*******************\n");  
 
     printf("*** VCB INFO ***\n");
-    vcb myvcb;
-    memcpy(&myvcb, vcb_tmp, sizeof(vcb));
+    memcpy(&inode_vcb, vcb_tmp, sizeof(vcb));
 
-    printf("Magic number: %d\n", myvcb.magic);
-    printf("Block size: %d\n", myvcb.blocksize);
-    printf("Root:\n\tBlock: %d\n\tvalid: %d\n", myvcb.root.block, myvcb.root.valid);
-    printf("Free:\n\tBlock: %d\n\tvalid: %d\n", myvcb.free.block, myvcb.free.valid);
+    printf("Magic number: %d\n", inode_vcb.magic);
+    printf("Block size: %d\n", inode_vcb.blocksize);
+    printf("Root:\n\tBlock: %d\n\tvalid: %d\n", inode_vcb.root.block, inode_vcb.root.valid);
+    printf("Free:\n\tBlock: %d\n\tvalid: %d\n", inode_vcb.free.block, inode_vcb.free.valid);
 
     printf("\n\n*** ROOT INFO ***\n");
-    dnode root;
     memcpy(&root, root_tmp, sizeof(dnode));
 
     printf("User id: %d\n", root.user);
@@ -100,7 +105,6 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
     printf("\nFirst direct block:\n\tBlock: %d\n\tValid: %d\n", root.direct[0].block, root.direct[0].valid);
 
     printf("\n\n*** ROOT DIRECTORY INFO ***\n");
-    dirent root_dir;
     memcpy(&root_dir, root_dir_tmp, sizeof(dirent));
 
     printf("First direntry:\n\tName: %s\n\tType: %c\n", root_dir.entries[0].name, root_dir.entries[0].type);
@@ -148,12 +152,18 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
     stbuf->st_rdev  = 0;
     stbuf->st_blksize = BLOCKSIZE;
 
-    /* 3600: YOU MUST UNCOMMENT BELOW AND IMPLEMENT THIS CORRECTLY */
     if (strcmp(path, "/") == 0) {
-        printf("\nSUCCESS: Yay we are in the root directory!\n");
-        stbuf->st_mode = 0777 | S_IFDIR;
+        // Root directory info
+        stbuf->st_mode = root.mode | S_IFDIR;
+        stbuf->st_uid = root.user;
+        stbuf->st_gid = root.group;
+        stbuf->st_atime = root.access_time.tv_sec;
+        stbuf->st_mtime = root.modify_time.tv_sec;
+        stbuf->st_ctime = root.create_time.tv_sec;
+        stbuf->st_size = root.size;
     } else {
-        printf("\nSUCCESS: We are in the directory: %s\n", path);
+        // Find the file
+        return -ENOENT;
     }
     /*
        if (The path represents the root directory)
@@ -224,15 +234,7 @@ static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         return -1;
     }
 
-    // Read in the root dnode
-    char* root_tmp = malloc(sizeof(dnode));
-    if (dread(1, root_tmp) < 0) {
-        perror("Error reading root directory from disk.");
-    }
-    dnode root;
-    memcpy(&root, root_tmp, sizeof(dnode));
-
-    // Step through the direct blocks
+    // Step through the direct blocks of root
     for (int i = 0; i < 54; i++) {
         printf("GETTING FILES FROM DIRECTORY.\n");
         printf("Reading direct block %d\n", i);
@@ -290,6 +292,111 @@ static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
  *
  */
 static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+    
+    // Find the first dirent that has empty space, then allocate space for the
+    // inode
+
+    // Look through the direct blocks first
+    printf("\n\n\n\nLET'S CREATE A FILE!!!\n\n\n\n");
+    for (int i = 0; i < 54; i++) {
+        printf("Reading direct block %d\n", i);
+        blocknum b = root.direct[i];
+        if (b.valid == false) {
+            // This means we need to create a dirent
+            continue;
+        }
+
+        // Read in the block's data, which should point to a dirent
+        int bnum = b.block;
+        char* dir_tmp = malloc(sizeof(dirent));
+        int result = dread(bnum, dir_tmp);
+        if (result < 0) {
+            printf("\n\nERROR: Could not read blocknum %d from disk.\n", bnum);
+            return -1;
+        }
+
+        dirent dir;
+        memcpy(&dir, dir_tmp, sizeof(dirent));
+
+        // Within the dirent, check each entry to see if the name matches
+        // If there is a match, we error. Otherwise, loop through to find
+        // an empty entry spot. If there is no empty spot (the loop finishes)
+        // then loop through to the next direct block to read in the next 
+        // dirent
+        for (int j = 0; j < 8; j++) {
+            direntry entry = dir.entries[j];
+            
+            if (entry.block.valid == false) {
+                // We found a spot to create a file!
+                blocknum freeb_block = inode_vcb.free;
+
+                char freeb_tmp[BLOCKSIZE];
+
+                if (dread(freeb_block.block, freeb_tmp) < 0) {
+                    perror("Error reading root directory entries from disk.");
+                }
+
+            
+                freeb free_block;
+                memcpy(&free_block, freeb_tmp, BLOCKSIZE);
+                
+                // Move to the next free block
+                inode_vcb.free = free_block.next;
+
+                // File data
+                inode new_file;
+                // Set the stats of the file
+                //TODO
+
+                // Entry data
+                direntry new_file_entry;
+                printf("Created new file entry struct.\n");
+                
+                strncpy(new_file_entry.name, path, 54);
+                new_file_entry.name[55] = '\0';
+
+                printf("File name: %s\n", new_file_entry.name);
+
+                new_file_entry.type = 'f';
+                new_file_entry.block = freeb_block;
+
+                dir.entries[j] = new_file_entry;
+
+                // Write the file to disk
+                char new_file_tmp[BLOCKSIZE];
+                memcpy(new_file_tmp, &new_file, BLOCKSIZE);
+                if (dwrite(freeb_block.block, new_file_tmp) < 0) {
+                    perror("ERROR: Could not create file.");
+                }
+
+                // Write the entry to disk
+                char new_dirent_tmp[BLOCKSIZE];
+                memcpy(new_dirent_tmp, &dir, BLOCKSIZE);
+                if (dwrite(bnum, new_dirent_tmp) < 0) {
+                    perror("ERROR: Could not write updated dirent");
+                }
+
+                return 0;
+            }
+            
+            char* name = entry.name;
+            if (strcmp(name, path) == 0) {
+                // Same file name :(
+                // ERROR
+                printf("ERROR: Tried to create the same file.");
+            }
+        }
+    }
+
+    // Step through the single-layer indirection
+    // TODO
+
+    // Step through the double-layer indirection
+    // TODO
+
+
+
+
     return 0;
 }
 
