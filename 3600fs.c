@@ -38,7 +38,7 @@
 
 #include "3600fs.h"
 #include "disk.h"
-
+#include "3600helper.h"
 
 // Global variables
 vcb inode_vcb;
@@ -67,6 +67,8 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
     /* 3600: YOU SHOULD ADD CODE HERE TO CHECK THE CONSISTENCY OF YOUR DISK
        AND LOAD ANY DATA STRUCTURES INTO MEMORY */
 
+    // ----- Get rid of the unused conn warning ----- //
+    conn = conn;
 
 
     // ----- Loading the VCB into memory ----- //
@@ -134,6 +136,9 @@ static void vfs_unmount (void *private_data) {
     /* 3600: YOU SHOULD ADD CODE HERE TO MAKE SURE YOUR ON-DISK STRUCTURES
        ARE IN-SYNC BEFORE THE DISK IS UNMOUNTED (ONLY NECESSARY IF YOU
        KEEP DATA CACHED THAT'S NOT ON DISK */
+
+    // ----- Get rid of the private_data unsed warning ----- //
+    private_data = private_data;
 
     // Do not touch or move this code; unconnects the disk
     dunconnect();
@@ -356,6 +361,82 @@ static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     return 0;
 }
 
+
+int vfs_create_file(dirent dir, int dirent_index, int entry_index, const char *path, mode_t mode, struct fuse_file_info *fi) {
+    // ----- Get the index of the first free block ----- //
+    int free_block_index = inode_vcb.free.index;
+    debug("First available free block is at %d\n", free_block_index); 
+
+    // ----- Read the free block into memory so we can update for the next one ----- //
+    debug("Reading in free block at %d\n", free_block_index);
+    freeb* free_block;
+    free_block = (freeb*) bread(free_block_index);
+    if (free_block == NULL) {
+        debug("Error reading in free block.");
+        return -1;
+    }
+
+    // ----- Update the VCB's free block ----- //
+    inode_vcb.free = free_block->next;
+
+    // ----- Write the updated VCB to disk ----- //
+    if (bwrite(0, &inode_vcb) < 0) {
+        debug("Error updating VCB on disk.\n");
+        return -1;
+    }
+
+    // ----- Create a new entry for the file ----- //
+    blocknum entry_blocknum;
+    entry_blocknum.index = free_block_index;
+    entry_blocknum.valid = true;
+
+    direntry new_file_entry;
+    strncpy(new_file_entry.name, path+1, 54);
+    new_file_entry.name[55] = '\0'; // Terminate name with null byte
+    new_file_entry.type = 'f';
+    new_file_entry.block = entry_blocknum;
+    new_file_entry.block.valid = true;
+    debug("New file name: %s\n", new_file_entry.name);
+
+    // ----- Update the dirent with the new entry ----- //
+    dir.entries[entry_index] = new_file_entry;
+
+    // ----- Write the updated dirent to disk ----- //
+    debug("Writing dirent to block %d\n", dirent_index);
+    if (bwrite(dirent_index, &dir) < 0) {
+        debug("ERROR: Could not write updated dirent");
+    }
+
+    // ----- Set the file's stats ----- //
+    inode new_file;
+    struct timespec current_time;
+    if ((clock_gettime(CLOCK_REALTIME, &current_time)) != 0) {
+        printf("ERROR: Cannot get time. \n");
+    }
+    new_file.access_time = current_time;
+    new_file.modify_time = current_time;
+    new_file.create_time = current_time;
+    new_file.size = sizeof(blocknum);
+    new_file.user = getuid();
+    new_file.group = getgid();
+    new_file.mode = 0644;
+
+    blocknum invalid_block;
+    invalid_block.index = -1;
+    invalid_block.valid = false;
+
+    for (int k = 0; k < 54; k++) {
+        new_file.direct[k] = invalid_block;
+    }
+
+    // ----- Write the new file stats to disk ----- //
+    if (bwrite(free_block_index, &new_file) < 0) {
+        debug("Error writing file to disk at block %d\n", free_block_index);
+    }
+
+    return 0;
+}
+
 /*
  * Given an absolute path to a file (for example /a/b/myFile), vfs_create 
  * will create a new file named myFile in the /a/b directory.
@@ -372,98 +453,64 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 
         // This means we need to create a dirent
         if (b.valid == false) {
+            // ----- Get the index of the first free block ----- //
+            int free_block_index = inode_vcb.free.index;
+            debug("First available free block is at %d\n", free_block_index); 
+
+            // ----- Read the free block into memory so we can update for the next one ----- //
+            debug("Reading in free block at %d\n", free_block_index);
+            freeb* free_block;
+            free_block = (freeb*) bread(free_block_index);
+            if (free_block == NULL) {
+                debug("Error reading in free block.");
+                return -1;
+            }
+
+            // ----- Update the free block of the VCB ----- //
+            inode_vcb.free = free_block->next;
+            debug("Set new free block on VCB at %d\n", inode_vcb.free.index);
+
+            // ----- Write the updated VCB to disk ----- //
+            if (bwrite(0, &inode_vcb) < 0) {
+                debug("Error updating VCB on disk.\n");
+                return -1;
+            }
+
+            // ----- Create a new dirent with empty entries ----- //
             debug("Creating a new dirent.\n");
             dirent new_dirent;
+
+            // Create an empty entry
             direntry empty_entry;
 
+            // Create an invalid block for empty entry
             blocknum invalid_block;
             invalid_block.index = -1;
             invalid_block.valid = false;
 
-            direntry empty_emptry;
+            // Set the fields on the empty entry
             strncpy(empty_entry.name, "", 55);
             empty_entry.type = '\0';
             empty_entry.block = invalid_block;
 
-            // ----- Read the free block into memory for file ----- //
-            freeb* free_block_for_file;
-            blocknum freeb_blocknum_for_file = inode_vcb.free;
-            char freeb_block_for_file_tmp[BLOCKSIZE];
-            if (dread(freeb_blocknum_for_file.index, freeb_block_for_file_tmp) < 0) {
-                debug("Error reading free block from disk.");
-            }
-            free_block_for_file = (freeb*) freeb_block_for_file_tmp;
-            inode_vcb.free = free_block_for_file->next;
-            debug("Loaded in free block for file at index %d\n", freeb_blocknum_for_file.index);
-
-
-            // ----- Read the free block into memory for dirent ----- //
-            freeb* free_block_for_dirent;
-            blocknum freeb_blocknum_for_dirent = inode_vcb.free;
-            char freeb_block_for_dirent_tmp[BLOCKSIZE];
-            if (dread(freeb_blocknum_for_dirent.index, freeb_block_for_dirent_tmp) < 0) {
-                debug("Error reading root directory entries from disk.");
-            }
-            free_block_for_dirent = (freeb*) freeb_block_for_dirent_tmp;
-            inode_vcb.free = free_block_for_dirent->next;
-            debug("Loaded in free block for dirent at index %d\n", freeb_blocknum_for_dirent.index);
-
-            // ----- Create a new entry for the file ----- //
-            direntry new_file_entry;
-            strncpy(new_file_entry.name, path+1, 54);
-            new_file_entry.name[55] = '\0'; // Terminate name with null byte
-            new_file_entry.type = 'f';
-            new_file_entry.block = freeb_blocknum_for_file;
-            new_file_entry.block.valid = true;
-            debug("New file name: %s\n", new_file_entry.name);
-
-            // ----- Update the new dirent with the new entry ----- //
-            new_dirent.entries[0] = new_file_entry;
-            for (int k = 1; k < 8; k++) {
-                new_dirent.entries[k] = empty_entry;
+            // Set the dirent to have all empty entries
+            for (int j = 0; j < 8; j++) {
+                new_dirent.entries[j] = empty_entry;
             }
 
-            // ----- Write the new dirent to disk ----- //
-            char new_dirent_tmp[BLOCKSIZE];
-            memcpy(new_dirent_tmp, &new_dirent, BLOCKSIZE);
-            debug("Writing new dirent to block %d\n", freeb_blocknum_for_dirent.index);
-            if (dwrite(freeb_blocknum_for_dirent.index, new_dirent_tmp) < 0) {
-                perror("ERROR: Could not write updated dirent");
-            }
-
-            // ----- Set the file's stats ----- //
-            inode new_file;
-            struct timespec current_time;
-            if ((clock_gettime(CLOCK_REALTIME, &current_time)) != 0) {
-                printf("ERROR: Cannot get time. \n");
-            }
-            new_file.access_time = current_time;
-            new_file.modify_time = current_time;
-            new_file.create_time = current_time;
-            new_file.size = sizeof(blocknum);
-            new_file.user = getuid();
-            new_file.group = getgid();
-            new_file.mode = 0644;
-
-            for (int k = 0; k < 54; k++) {
-                new_file.direct[i] = invalid_block;
-            }
-
-            // ----- Write the new file stats to disk ----- //
-            char new_file_tmp[BLOCKSIZE];
-            memcpy(new_file_tmp, &new_file, BLOCKSIZE);
-            debug("Writing new file to block %d\n", freeb_blocknum_for_file.index);
-            if (dwrite(freeb_blocknum_for_file.index, new_file_tmp) < 0) {
-                perror("ERROR: Could not create file.");
+            // ----- Create a new file using the new dirent ----- //
+            int success = vfs_create_file(new_dirent, free_block_index, 0, path, mode, fi); 
+            if (success != 0) {
+                debug("ERROR: Could not create file. Error code %d\n", success);
             }
 
             // ----- Rewrite the dnode to contain the new dirent ----- //
-            b.index = freeb_blocknum_for_dirent.index;
+            b.index = free_block_index;
             b.valid = true;
             root.direct[i] = b;
             char root_tmp[BLOCKSIZE];
             memcpy(root_tmp, &root, BLOCKSIZE);
-            if (dwrite(1, root_tmp) < 0) {
+            if (bwrite(1, &root) < 0) {
                 debug("ERROR: Could not rewrite root dnode to disk.\n");
                 return -1;
             }
@@ -488,84 +535,24 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
             an empty entry spot. If there is no empty spot (the loop finishes)
             then loop through to the next direct block to read in the next
             dirent block
-        */
+         */
         for (int j = 0; j < 8; j++) {
             direntry entry = dir.entries[j];
-            
+
             // ----- Found a free spot for a new file ----- //
             if (entry.block.valid == false) {
-
-                // ----- Read the free block into memory ----- //
-                freeb* free_block;
-                blocknum freeb_blocknum = inode_vcb.free;
-                char freeb_tmp[BLOCKSIZE];
-                if (dread(freeb_blocknum.index, freeb_tmp) < 0) {
-                    debug("Error reading root directory entries from disk.");
-                }
-                free_block = (freeb*) freeb_tmp;
-
-                //memcpy(&free_block, freeb_tmp, BLOCKSIZE);
-                
-                // ----- Update the VCB's free block ----- //
-                inode_vcb.free = free_block->next;
-
-                // ----- Create a new entry for the file ----- //
-                direntry new_file_entry;
-                strncpy(new_file_entry.name, path+1, 54);
-                new_file_entry.name[55] = '\0'; // Terminate name with null byte
-                new_file_entry.type = 'f';
-                new_file_entry.block = freeb_blocknum;
-                new_file_entry.block.valid = true;
-                debug("New file name: %s\n", new_file_entry.name);
-
-                // ----- Update the dirent with the new entry ----- //
-                dir.entries[j] = new_file_entry;
-
-                // ----- Write the updated dirent to disk ----- //
-                char new_dirent_tmp[BLOCKSIZE];
-                memcpy(new_dirent_tmp, &dir, BLOCKSIZE);
-                debug("Writing dirent to block %d\n", dirent_index);
-                if (dwrite(dirent_index, new_dirent_tmp) < 0) {
-                    perror("ERROR: Could not write updated dirent");
+                int success = vfs_create_file(dir, dirent_index, j, path, mode, fi); 
+                if (success != 0) {
+                    debug("ERROR: Could not create file. Error code %d\n", success);
                 }
 
-                // ----- Set the file's stats ----- //
-                //TODO
-                inode new_file;
-                struct timespec current_time;
-                if ((clock_gettime(CLOCK_REALTIME, &current_time)) != 0) {
-                    printf("ERROR: Cannot get time. \n");
-                }
-                new_file.access_time = current_time;
-                new_file.modify_time = current_time;
-                new_file.create_time = current_time;
-                new_file.size = sizeof(blocknum);
-                new_file.user = getuid();
-                new_file.group = getgid();
-                new_file.mode = 0644;
-
-                blocknum invalid_block;
-                invalid_block.index = -1;
-                invalid_block.valid = false;
-
-                for (int k = 0; k < 54; k++) {
-                    new_file.direct[i] = invalid_block;
-                }
-
-                // ----- Write the new file stats to disk ----- //
-                char new_file_tmp[BLOCKSIZE];
-                memcpy(new_file_tmp, &new_file, BLOCKSIZE);
-                if (dwrite(freeb_blocknum.index, new_file_tmp) < 0) {
-                    perror("ERROR: Could not create file.");
-                }
-
-                return 0;
+                return success;
             }
-            
-           /*   If there's no free space for creating a new file, we check
-                to make sure that there isn't a file in this space with the
-                same name before moving on to the next entry space
-            */
+
+            /*   If there's no free space for creating a new file, we check
+                 to make sure that there isn't a file in this space with the
+                 same name before moving on to the next entry space
+             */
             char* name = entry.name;
             if (strcmp(name, path+1) == 0) {
                 debug("ERROR: Tried to create the same file.");
@@ -599,6 +586,11 @@ static int vfs_read(const char *path, char *buf, size_t size, off_t offset,
         struct fuse_file_info *fi)
 {
 
+    path = path;
+    buf = buf;
+    size = size;
+    offset = offset;
+    fi = fi;
     return 0;
 }
 
@@ -620,6 +612,11 @@ static int vfs_write(const char *path, const char *buf, size_t size,
     /* 3600: NOTE THAT IF THE OFFSET+SIZE GOES OFF THE END OF THE FILE, YOU
        MAY HAVE TO EXTEND THE FILE (ALLOCATE MORE BLOCKS TO IT). */
 
+    path = path;
+    buf = buf;
+    size = size;
+    offset = offset;
+    fi = fi;
     return 0;
 }
 
@@ -633,6 +630,7 @@ static int vfs_delete(const char *path)
     /* 3600: NOTE THAT THE BLOCKS CORRESPONDING TO THE FILE SHOULD BE MARKED
        AS FREE, AND YOU SHOULD MAKE THEM AVAILABLE TO BE USED WITH OTHER FILES */
 
+    path = path;
     return 0;
 }
 
@@ -646,6 +644,8 @@ static int vfs_delete(const char *path)
 static int vfs_rename(const char *from, const char *to)
 {
 
+    from = from;
+    to = to;
     return 0;
 }
 
@@ -662,6 +662,9 @@ static int vfs_rename(const char *from, const char *to)
 static int vfs_chmod(const char *file, mode_t mode)
 {
 
+    file = file;
+    mode = mode;
+
     return 0;
 }
 
@@ -673,6 +676,9 @@ static int vfs_chmod(const char *file, mode_t mode)
 static int vfs_chown(const char *file, uid_t uid, gid_t gid)
 {
 
+    file = file;
+    uid = uid;
+    gid = gid;
     return 0;
 }
 
@@ -683,6 +689,8 @@ static int vfs_chown(const char *file, uid_t uid, gid_t gid)
 static int vfs_utimens(const char *file, const struct timespec ts[2])
 {
 
+    file = file;
+    ts = ts;
     return 0;
 }
 
@@ -696,6 +704,8 @@ static int vfs_truncate(const char *file, off_t offset)
 
     /* 3600: NOTE THAT ANY BLOCKS FREED BY THIS OPERATION SHOULD
        BE AVAILABLE FOR OTHER FILES TO USE. */
+    file = file;
+    offset = offset;
 
     return 0;
 }
@@ -735,3 +745,26 @@ int main(int argc, char *argv[]) {
     return fuse_main(argc, argv, &vfs_oper, NULL);
 }
 
+// Helper function for writing to disk
+int bwrite(int blocknum, void *buf) {
+    char buffer[BLOCKSIZE];
+    memcpy(buffer, buf, BLOCKSIZE);
+    int err = dwrite(blocknum, buffer);
+    if (err < 0) {
+        debug("Error writing block %d to disk.", blocknum);
+        return -1;
+    }
+
+    return 0;
+}
+
+// Helper function for reading from disk
+char* bread(int blocknum) {
+    char buffer[BLOCKSIZE];
+    if (dread(blocknum, buffer) < 0) {
+        debug("Error reading root directory entries from disk.");
+        return NULL;
+    }
+
+    return buffer;
+}

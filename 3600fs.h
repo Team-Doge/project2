@@ -8,6 +8,9 @@
 #ifndef __3600FS_H__
 #define __3600FS_H__
 
+// Import helper functions
+#include "3600helper.h"
+
 // The number of the block and if it is valid (written to) or not
 typedef struct blocknum_t {
     int index;

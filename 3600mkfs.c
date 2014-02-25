@@ -114,13 +114,9 @@ void myformat(int size) {
 
 
     // Write the vcb to memory at block 0
-    char* vcb_tmp = malloc(sizeof(myvcb));
-    memcpy(vcb_tmp, &myvcb, sizeof(myvcb));
-    if (dwrite(0, vcb_tmp) < 0) {
+    if (bwrite(0, &myvcb) < 0) {
         perror("ERROR: Could not write vcb to disk.\n");
     }
-
-    free(vcb_tmp);
 
    // printf("The size of root_dir is %d\n", (int) sizeof(root_dir));
 
@@ -180,4 +176,17 @@ int main(int argc, char** argv) {
     unsigned long size = atoi(argv[1]);
     printf("Formatting the disk with size %lu \n", size);
     myformat(size);
+}
+
+
+int bwrite(int blocknum, void *buf) {
+    char buffer[BLOCKSIZE];
+    memcpy(buffer, buf, BLOCKSIZE);
+    int err = dwrite(blocknum, buffer);
+    if (err < 0) {
+        printf("Error writing block %d to disk.", blocknum);
+        return -1;
+    }
+
+    return 0;
 }
