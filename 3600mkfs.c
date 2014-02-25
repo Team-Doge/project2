@@ -68,6 +68,14 @@ void myformat(int size) {
     root.user = getuid();
     root.group = getgid();
     root.mode = 0777;
+ 
+    blocknum invalid_block;
+    invalid_block.index = -1;
+    invalid_block.valid = 0;
+
+    for (int i = 1; i < 54; i++) {
+        root.direct[i] = invalid_block;
+    }
     
     struct timespec current_time;
     if ((clock_gettime(CLOCK_REALTIME, &current_time)) != 0) {

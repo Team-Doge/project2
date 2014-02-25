@@ -167,32 +167,87 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
         stbuf->st_mtime = root.modify_time.tv_sec;
         stbuf->st_ctime = root.create_time.tv_sec;
         stbuf->st_size = root.size;
+        return 0;
     } else {
-    // ----- Reading stat on files ----- //
+        // ----- Reading stat on a file----- //
+        // ----- Step through the direct blocks of root dnode ----- //
+        debug("Searching for file: '%s'\n", path);
+        for (int i = 0; i < 54; i++) {
+            blocknum b = root.direct[i];
+            debug("Reading direct block %d of root dnode.\n", i);
+
+            // Check the validity of the block, and don't read it if it is not
+            // a valid blocknum
+            if (b.valid == 0) {
+                debug("File not found.\n");
+                return -ENOENT;
+            }
+
+            // ----- Found a valid block, read its data ----- //
+            dirent* dir;
+            int dirent_index = b.index;
+            char dir_tmp[BLOCKSIZE];
+            debug("Block number to read data from: %d\n", dirent_index);
+            if (dread(dirent_index, dir_tmp) < 0) {
+                debug("ERROR: Could not read blocknum %d from disk.\n", dirent_index);
+                return -1;
+            }
+
+            dir = (dirent*) dir_tmp;
+
+            // ----- Read through the entries of the loaded dirent block ----- //
+            for (int j = 0; j < 8; j++) {
+                direntry entry = dir->entries[j];
+
+                // ----- No more entries in the dirent, all entries read ----- //
+                if (entry.block.valid != 1) {
+                    return -ENOENT;
+                }
+
+                // ----- Load the entry name into the buffer ----- //
+                char* entry_name = entry.name;
+                int filename_size = sizeof(path);
+                char filename[filename_size - 1];
+                strcpy(filename, path + 1);
+                debug("Entry name to compare against: '%s'\n", entry_name);
+                debug("Extracted file name: '%s'\n", filename);
+
+                // ----- Check to see if the filename and entry match ----- //
+                if (strcmp(filename, entry_name) == 0) {
+
+                    // ----- Load the file inode ----- //
+                    inode* file;
+                    char file_tmp[BLOCKSIZE];
+                    debug("Block number to read data from: %d\n", entry.block.index);
+                    if (dread(entry.block.index, file_tmp) < 0) {
+                        debug("ERROR: Could not read blocknum %d from disk.\n", dirent_index);
+                        return -1;
+                    }
+                    file = (inode*) file_tmp;
+
+                    stbuf->st_mode = file->mode | S_IFREG;
+                    stbuf->st_uid = file->user;
+                    stbuf->st_gid = file->group;
+                    stbuf->st_atime = file->access_time.tv_sec;
+                    stbuf->st_mtime = file->modify_time.tv_sec;
+                    stbuf->st_ctime = file->create_time.tv_sec;
+                    stbuf->st_size = file->size;
+
+                    return 0;
+                }
+            }
+        }
+
+        // Step through the single-layer indirection if there are more blocks
         // TODO
-        // Return actual stats
+
+        // Step through the double-layer indirection if there are more blocks
+        // TODO
+
         return -ENOENT;
     }
 
-
-
-    // Basic example of how data should be set
-    /*
-       if (The path represents the root directory)
-       stbuf->st_mode  = 0777 | S_IFDIR;
-       else 
-       stbuf->st_mode  = <<file mode>> | S_IFREG;
-
-       stbuf->st_uid     = // file uid
-       stbuf->st_gid     = // file gid
-       stbuf->st_atime   = // access time 
-       stbuf->st_mtime   = // modify time
-       stbuf->st_ctime   = // create time
-       stbuf->st_size    = // file size
-       stbuf->st_blocks  = // file size in blocks
-     */
-
-    return 0;
+    return -1;
 }
 
 /*
@@ -315,9 +370,105 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
         blocknum b = root.direct[i];
         debug("Loading blocknum %d\n", b);
 
-        // TODO: This means we need to create a dirent
+        // This means we need to create a dirent
         if (b.valid == false) {
-            break;
+            debug("Creating a new dirent.\n");
+            dirent new_dirent;
+            direntry empty_entry;
+
+            blocknum invalid_block;
+            invalid_block.index = -1;
+            invalid_block.valid = false;
+
+            direntry empty_emptry;
+            strncpy(empty_entry.name, "", 55);
+            empty_entry.type = '\0';
+            empty_entry.block = invalid_block;
+
+            // ----- Read the free block into memory for file ----- //
+            freeb* free_block_for_file;
+            blocknum freeb_blocknum_for_file = inode_vcb.free;
+            char freeb_block_for_file_tmp[BLOCKSIZE];
+            if (dread(freeb_blocknum_for_file.index, freeb_block_for_file_tmp) < 0) {
+                debug("Error reading free block from disk.");
+            }
+            free_block_for_file = (freeb*) freeb_block_for_file_tmp;
+            inode_vcb.free = free_block_for_file->next;
+            debug("Loaded in free block for file at index %d\n", freeb_blocknum_for_file.index);
+
+
+            // ----- Read the free block into memory for dirent ----- //
+            freeb* free_block_for_dirent;
+            blocknum freeb_blocknum_for_dirent = inode_vcb.free;
+            char freeb_block_for_dirent_tmp[BLOCKSIZE];
+            if (dread(freeb_blocknum_for_dirent.index, freeb_block_for_dirent_tmp) < 0) {
+                debug("Error reading root directory entries from disk.");
+            }
+            free_block_for_dirent = (freeb*) freeb_block_for_dirent_tmp;
+            inode_vcb.free = free_block_for_dirent->next;
+            debug("Loaded in free block for dirent at index %d\n", freeb_blocknum_for_dirent.index);
+
+            // ----- Create a new entry for the file ----- //
+            direntry new_file_entry;
+            strncpy(new_file_entry.name, path+1, 54);
+            new_file_entry.name[55] = '\0'; // Terminate name with null byte
+            new_file_entry.type = 'f';
+            new_file_entry.block = freeb_blocknum_for_file;
+            new_file_entry.block.valid = true;
+            debug("New file name: %s\n", new_file_entry.name);
+
+            // ----- Update the new dirent with the new entry ----- //
+            new_dirent.entries[0] = new_file_entry;
+            for (int k = 1; k < 8; k++) {
+                new_dirent.entries[k] = empty_entry;
+            }
+
+            // ----- Write the new dirent to disk ----- //
+            char new_dirent_tmp[BLOCKSIZE];
+            memcpy(new_dirent_tmp, &new_dirent, BLOCKSIZE);
+            debug("Writing new dirent to block %d\n", freeb_blocknum_for_dirent.index);
+            if (dwrite(freeb_blocknum_for_dirent.index, new_dirent_tmp) < 0) {
+                perror("ERROR: Could not write updated dirent");
+            }
+
+            // ----- Set the file's stats ----- //
+            inode new_file;
+            struct timespec current_time;
+            if ((clock_gettime(CLOCK_REALTIME, &current_time)) != 0) {
+                printf("ERROR: Cannot get time. \n");
+            }
+            new_file.access_time = current_time;
+            new_file.modify_time = current_time;
+            new_file.create_time = current_time;
+            new_file.size = sizeof(blocknum);
+            new_file.user = getuid();
+            new_file.group = getgid();
+            new_file.mode = 0644;
+
+            for (int k = 0; k < 54; k++) {
+                new_file.direct[i] = invalid_block;
+            }
+
+            // ----- Write the new file stats to disk ----- //
+            char new_file_tmp[BLOCKSIZE];
+            memcpy(new_file_tmp, &new_file, BLOCKSIZE);
+            debug("Writing new file to block %d\n", freeb_blocknum_for_file.index);
+            if (dwrite(freeb_blocknum_for_file.index, new_file_tmp) < 0) {
+                perror("ERROR: Could not create file.");
+            }
+
+            // ----- Rewrite the dnode to contain the new dirent ----- //
+            b.index = freeb_blocknum_for_dirent.index;
+            b.valid = true;
+            root.direct[i] = b;
+            char root_tmp[BLOCKSIZE];
+            memcpy(root_tmp, &root, BLOCKSIZE);
+            if (dwrite(1, root_tmp) < 0) {
+                debug("ERROR: Could not rewrite root dnode to disk.\n");
+                return -1;
+            }
+
+            return 0;
         }
 
         // ----- Read in the block's data ----- //
@@ -360,10 +511,11 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 
                 // ----- Create a new entry for the file ----- //
                 direntry new_file_entry;
-                strncpy(new_file_entry.name, path, 54);
+                strncpy(new_file_entry.name, path+1, 54);
                 new_file_entry.name[55] = '\0'; // Terminate name with null byte
                 new_file_entry.type = 'f';
                 new_file_entry.block = freeb_blocknum;
+                new_file_entry.block.valid = true;
                 debug("New file name: %s\n", new_file_entry.name);
 
                 // ----- Update the dirent with the new entry ----- //
@@ -372,6 +524,7 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
                 // ----- Write the updated dirent to disk ----- //
                 char new_dirent_tmp[BLOCKSIZE];
                 memcpy(new_dirent_tmp, &dir, BLOCKSIZE);
+                debug("Writing dirent to block %d\n", dirent_index);
                 if (dwrite(dirent_index, new_dirent_tmp) < 0) {
                     perror("ERROR: Could not write updated dirent");
                 }
@@ -379,6 +532,25 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
                 // ----- Set the file's stats ----- //
                 //TODO
                 inode new_file;
+                struct timespec current_time;
+                if ((clock_gettime(CLOCK_REALTIME, &current_time)) != 0) {
+                    printf("ERROR: Cannot get time. \n");
+                }
+                new_file.access_time = current_time;
+                new_file.modify_time = current_time;
+                new_file.create_time = current_time;
+                new_file.size = sizeof(blocknum);
+                new_file.user = getuid();
+                new_file.group = getgid();
+                new_file.mode = 0644;
+
+                blocknum invalid_block;
+                invalid_block.index = -1;
+                invalid_block.valid = false;
+
+                for (int k = 0; k < 54; k++) {
+                    new_file.direct[i] = invalid_block;
+                }
 
                 // ----- Write the new file stats to disk ----- //
                 char new_file_tmp[BLOCKSIZE];
@@ -395,7 +567,7 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
                 same name before moving on to the next entry space
             */
             char* name = entry.name;
-            if (strcmp(name, path) == 0) {
+            if (strcmp(name, path+1) == 0) {
                 debug("ERROR: Tried to create the same file.");
             }
         }
