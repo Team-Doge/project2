@@ -86,4 +86,12 @@ typedef struct free_t {
     char junk[504];
 } freeb;
 
+// Debugger functions
+void debug_dirent(dirent* d);
+void debug_direntry(direntry* e);
+void debug_block(blocknum* b);
+void debug_inode(inode* i);
+void debug_dnode(dnode* d);
+void debug_vcb(vcb* v);
+void debug_freeb(freeb* f);
 #endif

@@ -31,9 +31,9 @@ void myformat(int size) {
        STRUCTURES TO THEIR INITIAL VALUE, AS YOU ARE FORMATTING
        A BLANK DISK.  YOUR DISK SHOULD BE size BLOCKS IN SIZE. */
 
-    blocknum *blocks = calloc(size, BLOCKSIZE);
+    blocknum *blocks = calloc(size-1, BLOCKSIZE);
 
-    for (int i = 0; i < size; i++) {
+    for (int i = 1; i < size; i++) {
         blocknum b;
         b.index = i;
         b.valid = 0;
@@ -41,17 +41,22 @@ void myformat(int size) {
     }
 
     freeb *free_blocks = calloc(size - 3, BLOCKSIZE);
-    for (int i = 3; i < size; i++) {
+    for (int i = 0; i < size - 3; i++) {
         freeb f;
-        blocknum b = blocks[i];
+        blocknum b = blocks[i+4];
 
-        if ((i + 1) == size) {
+        if ((i + 4) == size) {
             b.valid = 1;
+            b.index = -1;
+        } else {
+            b.valid = 0;
         }
 
         f.next = b;
-        free_blocks[i-3] = f;
+        free_blocks[i] = f;
+        // printf("Free block created with next pointing to %d\n", b.index);
     }
+
 
     vcb myvcb;
     myvcb.blocksize = BLOCKSIZE;
@@ -141,6 +146,7 @@ void myformat(int size) {
         freeb f = free_blocks[i-3];
         char* free_tmp = malloc(sizeof(f));
         memcpy(free_tmp, &f, sizeof(f));
+        // printf("Writing free block %d to disk at block %d.\n", f.next.index, i);
         if (dwrite(i, free_tmp) < 0) {
             perror("Error writing free blocks to disk.");
         }
