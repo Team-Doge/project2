@@ -218,7 +218,7 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
 
                 // ----- No more entries in the dirent, all entries read ----- //
                 if (entry.block.valid != 1) {
-                    return -ENOENT;
+                    continue;
                 }
 
                 // ----- Load the entry name into the buffer ----- //
@@ -333,28 +333,30 @@ static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         // a valid blocknum
         if (b.valid == 0) {
             debug("\tDirect block %d was invalid.\n", i);
-            continue;
+            return 0;
         }
 
         // ----- Checked out valid block, read its data ----- //
-        int dirent_index = b.index;
-        char* dir_tmp = malloc(sizeof(dirent));
-        debug("Block number to read data from: %d\n", dirent_index);
-        if (dread(dirent_index, dir_tmp) < 0) {
-            debug("ERROR: Could not read blocknum %d from disk.\n", dirent_index);
-            return -1;
-        }
+        // int dirent_index = b.index;
+        // char* dir_tmp = malloc(sizeof(dirent));
+        // debug("Block number to read data from: %d\n", dirent_index);
+        // if (dread(dirent_index, dir_tmp) < 0) {
+        //     debug("ERROR: Could not read blocknum %d from disk.\n", dirent_index);
+        //     return -1;
+        // }
 
-        dirent dir;
-        memcpy(&dir, dir_tmp, sizeof(dirent));
+        // dirent dir;
+        // memcpy(&dir, dir_tmp, sizeof(dirent));
+
+        dirent* dir = (dirent*) bread(b.index);
 
         // ----- Read through the entries of the loaded dirent block ----- //
         for (int j = 0; j < 8; j++) {
-            direntry entry = dir.entries[j];
+            direntry entry = dir->entries[j];
 
             // ----- No more entries in the dirent, all entries read ----- //
-            if (entry.block.valid != 1) {
-                return 0;
+            if (entry.block.valid == false) {
+                continue;
             }
             
             // ----- Load the entry name into the buffer ----- //
@@ -659,7 +661,49 @@ static int vfs_delete(const char *path)
     /* 3600: NOTE THAT THE BLOCKS CORRESPONDING TO THE FILE SHOULD BE MARKED
        AS FREE, AND YOU SHOULD MAKE THEM AVAILABLE TO BE USED WITH OTHER FILES */
 
-    path = path;
+    //----- Extract file name -----//
+    // TODO 
+    // When we support multiple level directories, fix this
+    char* filename = (char*) malloc(sizeof(path));
+    strncpy(filename, path + 1, sizeof(path));
+    debug("Deleting file: '%s'\n", path);
+    //----- Cycle through direct blocks to find the entry -----//
+    for (int i = 0; i < 54; i++) {
+        debug("\tChecking direct block %d for entry.\n", i);
+        blocknum b = root.direct[i];
+        if (b.valid == true) {
+            debug("\tReading in dirent at block %d\n", b.index);
+            dirent* d;
+            d = (dirent*) bread(b.index);
+
+            // ----- Read through the entries -----//
+            for (int j = 0; j < 8; j++) {
+                direntry* entry = &d->entries[j];
+                if (entry->block.valid == true) {
+                    debug("\tComparing %s with %s\n", entry->name, filename);
+                    if (strcmp(entry->name, filename) == 0) {
+                        // Delete!
+                        debug("\tMatch! Setting the entry to be invalid.\n");
+                        entry->block.valid = false;
+                        debug("\tNew dirent:\n");
+                        debug_dirent(d);
+                        debug("\tWriting new dirent to disk.\n");
+                        bwrite(b.index, d);
+                        //TODO update free
+                        return 0;
+                    }
+                }
+            }
+        } else {
+            debug("\tFile not found.\n");
+            return -ENOENT;
+        }
+    }
+
+    // TODO
+    // Cycle through the single indirection and double indirection
+
+
     return 0;
 }
 
