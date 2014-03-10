@@ -49,8 +49,20 @@ char* bread(int blocknum) {
     return buffer;
 }
 
+/**
+ * Find the file entry for the file located at the given path
+ * @param  blocks The list of blocks to look in
+ * @param  size   The size of the list of blocks
+ * @param  path   The name of the file
+ * @return        The proper direntry for the file or NULL
+ */
+direntry* find_file_entry(blocknum* blocks, int size, const char* path);
+int get_file_attr(direntry *entry, struct stat *stbuf);
+
+
+
 // Helper functions for dealing with dirents
-int find_file_attr(dirent *dir, const char *path, struct stat *stbuf);
+// int find_file_attr(dirent *dir, const char *path, struct stat *stbuf);
 
 // Helper functiongs dealing with file creation
 // int create_file(dirent* dir, int dirent_index, int entry_index, const char *path, mode_t mode, struct fuse_file_info *fi);
