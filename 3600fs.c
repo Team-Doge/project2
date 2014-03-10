@@ -194,22 +194,20 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
 
         // ----- Step through the direct blocks of root dnode ----- //
         debug("Searching direct blocks.\n");
-        direntry *entry = find_file_entry(root.direct, 54, path);
-        if (entry != NULL) {
-            int success = get_file_attr(entry, stbuf);
-            free(entry);
-            return success;
+        direntry entry;
+        find_file_entry(&entry, root.direct, 54, path);
+        if (&entry != NULL) {
+            return get_file_attr(&entry, stbuf);
         }
 
         // ----- Step through the first layer of indirection ----- //
         if (root.single_indirect.valid == true) {
             debug("Searching single indirect.\n");
             indirect* ind = (indirect*) bread(root.single_indirect.index);
-            direntry *entry = find_file_entry(ind->blocks, 128, path);
-            if (entry != NULL) {
-                int success = get_file_attr(entry, stbuf);
-                free(entry);
-                return success;
+            direntry entry;
+            find_file_entry(&entry, ind->blocks, 128, path);
+            if (&entry != NULL) {
+                return get_file_attr(&entry, stbuf);
             }
         }
 
@@ -227,11 +225,10 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
 
                 debug("Searching %d/128 single indirect inside double.\n", i+1);
                 indirect* ind1 = (indirect*) bread(b2.index);
-                direntry *entry = find_file_entry(ind1->blocks, 128, path);
-                if (entry != NULL) {
-                    int success = get_file_attr(entry, stbuf);
-                    free(entry);
-                    return success;
+                direntry entry;
+                find_file_entry(&entry, ind1->blocks, 128, path);
+                if (&entry != NULL) {
+                    return get_file_attr(&entry, stbuf);
                 }
             }
         }
@@ -242,23 +239,23 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
     return -1;
 }
 
-direntry* find_file_entry(blocknum* blocks, int size, const char* path) {
+void find_file_entry(direntry *entry, blocknum* blocks, int size, const char* path) {
     debug("Looking through %d blocks for '%s'.\n", size, path);
     for (int i = 0; i < size; i++) {
         blocknum b = blocks[i];
         debug("\tBlock %d/%d in list points to block %d.\n", i+1, size, b.index);
         if (b.valid == false) {
             debug("\tBlock %d is invalid.\n", b.index);
-            return NULL;
+            entry = NULL;
+            return;
         }
 
         dirent *dir = (dirent *) bread(b.index);
         for (int j = 0; j < 8; j++) {
-            direntry* entry = (direntry *) malloc(sizeof(direntry));
-            entry = &dir->entries[j];
+            direntry *e = &dir->entries[j];
             // If it's not valid, skip it
-            if (entry->block.valid == true) {
-                switch (entry->type) {
+            if (e->block.valid == true) {
+                switch (e->type) {
                     case 'd':
                         // TODO
                         // If we support multiple directories, this
@@ -267,8 +264,9 @@ direntry* find_file_entry(blocknum* blocks, int size, const char* path) {
                         // across this just skip it
                         break;
                     case 'f':
-                        if (strncmp(entry->name, path+1, 55) == 0) {
-                            return entry;
+                        if (strncmp(e->name, path+1, 55) == 0) {
+                            entry = e;
+                            return;
                         }
                         break;
                     default:
@@ -279,8 +277,8 @@ direntry* find_file_entry(blocknum* blocks, int size, const char* path) {
 
         }
     }
-
-    return NULL;
+    // File not found
+    entry = NULL;
 }
 
 int get_file_attr(direntry *entry, struct stat *stbuf) {

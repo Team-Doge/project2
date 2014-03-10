@@ -56,7 +56,7 @@ char* bread(int blocknum) {
  * @param  path   The name of the file
  * @return        The proper direntry for the file or NULL
  */
-direntry* find_file_entry(blocknum* blocks, int size, const char* path);
+void find_file_entry(direntry *entry, blocknum* blocks, int size, const char* path);
 int get_file_attr(direntry *entry, struct stat *stbuf);
 
 
