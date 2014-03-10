@@ -57,6 +57,9 @@ void myformat(int size) {
         // printf("Free block created with next pointing to %d\n", b.index);
     }
 
+    blocknum invalid_block;
+    invalid_block.index = -1;
+    invalid_block.valid = 0;
 
     vcb myvcb;
     myvcb.blocksize = BLOCKSIZE;
@@ -73,11 +76,9 @@ void myformat(int size) {
     root.user = getuid();
     root.group = getgid();
     root.mode = 0777;
+    root.single_indirect = invalid_block;
+    root.double_indirect = invalid_block;
  
-    blocknum invalid_block;
-    invalid_block.index = -1;
-    invalid_block.valid = 0;
-
     for (int i = 1; i < 54; i++) {
         root.direct[i] = invalid_block;
     }

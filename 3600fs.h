@@ -8,9 +8,6 @@
 #ifndef __3600FS_H__
 #define __3600FS_H__
 
-// Import helper functions
-#include "3600helper.h"
-
 // The number of the block and if it is valid (written to) or not
 typedef struct blocknum_t {
     int index;
@@ -86,12 +83,11 @@ typedef struct free_t {
     char junk[504];
 } freeb;
 
-// Debugger functions
-void debug_dirent(dirent* d);
-void debug_direntry(direntry* e);
-void debug_block(blocknum* b);
-void debug_inode(inode* i);
-void debug_dnode(dnode* d);
-void debug_vcb(vcb* v);
-void debug_freeb(freeb* f);
+typedef struct indirect_t {
+    blocknum blocks[128];
+} indirect;
+
+// Import helper functions
+#include "3600helper.h"
+
 #endif
