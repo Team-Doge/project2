@@ -265,7 +265,7 @@ bool find_file_entry(direntry *entry, blocknum* blocks, int size, const char* pa
                         break;
                     case 'f':
                         if (strncmp(e->name, path+1, 55) == 0) {
-                            entry = e;
+                            *entry = *e;
                             return true;
                         }
                         break;
@@ -970,7 +970,7 @@ static int vfs_delete(const char *path)
                 direntry* entry = &d->entries[j];
                 if (entry->block.valid == true) {
                     debug("\tComparing %s with %s\n", entry->name, filename);
-                    if (strcmp(entry->name, filename) == 0) {
+                    if (strncmp(entry->name, path+1, 55) == 0) {
                         // Delete!
                         debug("\tMatch! Setting the entry to be invalid.\n");
                         entry->block.valid = false;
