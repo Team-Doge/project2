@@ -30,7 +30,13 @@
 #include <errno.h>
 #include <assert.h>
 #include <stdbool.h>
-#include <sys/statfs.h>
+#include <sys/time.h>
+
+#ifdef __APPLE__
+ #include <sys/statvfs.h>
+#else
+ #include <sys/statfs.h>
+#endif
 
 #ifdef HAVE_SETXATTR
 #include <sys/xattr.h>
@@ -71,7 +77,7 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
        AND LOAD ANY DATA STRUCTURES INTO MEMORY */
 
     // ----- Get rid of the unused conn warning ----- //
-    conn = conn;
+    conn = conn + 0;
 
 
     // ----- Loading the VCB into memory ----- //
@@ -153,7 +159,7 @@ static void vfs_unmount (void *private_data) {
        KEEP DATA CACHED THAT'S NOT ON DISK */
 
     // ----- Get rid of the private_data unsed warning ----- //
-    private_data = private_data;
+    private_data = (void*) private_data;
 
     // Do not touch or move this code; unconnects the disk
     dunconnect();
@@ -358,7 +364,7 @@ static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         off_t offset, struct fuse_file_info *fi)
 {
     // Get rid of compiler warnings about unused parameters
-    fi = fi;
+    fi = fi + 0;
 
     // ----- Check to see what directory is being read ----- //
     debug("Path to be read: '%s'\n", path);
@@ -768,8 +774,8 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 int create_file(dirent* dir, int dirent_index, int entry_index, const char *path, mode_t mode, struct fuse_file_info *fi) {
     debug("Creating new file.\n");
     // Get rid of compiler warnings of unused parameters
-    fi = fi;
-    mode = mode;
+    fi = fi + 0;
+    mode = mode + 0;
 
     // ----- Get the index of the first free block ----- //
     int free_block_index = global_vcb.free.index;
@@ -817,9 +823,16 @@ int create_file(dirent* dir, int dirent_index, int entry_index, const char *path
     // ----- Set the file's stats ----- //
     inode new_file;
     struct timespec current_time;
-    if ((clock_gettime(CLOCK_REALTIME, &current_time)) != 0) {
-        printf("ERROR: Cannot get time. \n");
+    struct timeval ctval;
+    if (gettimeofday(&ctval, NULL) != 0) {
+        printf("Error getting time.\n");
     }
+    current_time.tv_sec = ctval.tv_sec;
+    current_time.tv_nsec = ctval.tv_usec * 1000;
+
+    // if ((clock_gettime(CLOCK_REALTIME, &current_time)) != 0) {
+    //     printf("ERROR: Cannot get time. \n");
+    // }
     new_file.access_time = current_time;
     new_file.modify_time = current_time;
     new_file.create_time = current_time;
@@ -914,11 +927,11 @@ static int vfs_read(const char *path, char *buf, size_t size, off_t offset,
         struct fuse_file_info *fi)
 {
 
-    path = path;
-    buf = buf;
-    size = size;
-    offset = offset;
-    fi = fi;
+    path = path + 0;
+    buf = buf + 0;
+    size = size + 0;
+    offset = offset + 0;
+    fi = fi + 0;
     return 0;
 }
 
@@ -940,11 +953,11 @@ static int vfs_write(const char *path, const char *buf, size_t size,
     /* 3600: NOTE THAT IF THE OFFSET+SIZE GOES OFF THE END OF THE FILE, YOU
        MAY HAVE TO EXTEND THE FILE (ALLOCATE MORE BLOCKS TO IT). */
 
-    path = path;
-    buf = buf;
-    size = size;
-    offset = offset;
-    fi = fi;
+    path = path + 0;
+    buf = buf + 0;
+    size = size + 0;
+    offset = offset + 0;
+    fi = fi + 0;
     return 0;
 }
 
@@ -1014,8 +1027,8 @@ static int vfs_delete(const char *path)
 static int vfs_rename(const char *from, const char *to)
 {
 
-    from = from;
-    to = to;
+    from = from + 0;
+    to = to + 0;
     return 0;
 }
 
@@ -1032,8 +1045,8 @@ static int vfs_rename(const char *from, const char *to)
 static int vfs_chmod(const char *file, mode_t mode)
 {
 
-    file = file;
-    mode = mode;
+    file = file + 0;
+    mode = mode + 0;
 
     return 0;
 }
@@ -1046,9 +1059,9 @@ static int vfs_chmod(const char *file, mode_t mode)
 static int vfs_chown(const char *file, uid_t uid, gid_t gid)
 {
 
-    file = file;
-    uid = uid;
-    gid = gid;
+    file = file + 0;
+    uid = uid + 0;
+    gid = gid + 0;
     return 0;
 }
 
@@ -1059,8 +1072,8 @@ static int vfs_chown(const char *file, uid_t uid, gid_t gid)
 static int vfs_utimens(const char *file, const struct timespec ts[2])
 {
 
-    file = file;
-    ts = ts;
+    file = file + 0;
+    ts = ts + 0;
     return 0;
 }
 
@@ -1074,8 +1087,8 @@ static int vfs_truncate(const char *file, off_t offset)
 
     /* 3600: NOTE THAT ANY BLOCKS FREED BY THIS OPERATION SHOULD
        BE AVAILABLE FOR OTHER FILES TO USE. */
-    file = file;
-    offset = offset;
+    file = file + 0;
+    offset = offset + 0;
 
     return 0;
 }

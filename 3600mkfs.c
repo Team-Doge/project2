@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 #include "3600fs.h"
 #include "disk.h"
@@ -84,9 +85,15 @@ void myformat(int size) {
     }
     
     struct timespec current_time;
-    if ((clock_gettime(CLOCK_REALTIME, &current_time)) != 0) {
-        printf("ERROR: Cannot get time. \n");
+    struct timeval ctval;
+    if (gettimeofday(&ctval, NULL) != 0) {
+        printf("Error getting time.\n");
     }
+    current_time.tv_sec = ctval.tv_sec;
+    current_time.tv_nsec = ctval.tv_usec * 1000;
+    // if ((clock_gettime(CLOCK_REALTIME, &current_time)) != 0) {
+    //     printf("ERROR: Cannot get time. \n");
+    // }
     root.access_time = current_time;
     root.modify_time = current_time;
     root.create_time = current_time;
