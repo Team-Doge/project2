@@ -29,7 +29,6 @@
 #include <dirent.h>
 #include <errno.h>
 #include <assert.h>
-#include <stdbool.h>
 #include <sys/time.h>
 
 #ifdef __APPLE__
