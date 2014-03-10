@@ -799,7 +799,7 @@ int create_file(dirent* dir, int dirent_index, int entry_index, const char *path
 
     direntry new_file_entry;
     strncpy(new_file_entry.name, path+1, 54);
-    new_file_entry.name[55] = '\0'; // Terminate name with null byte
+    new_file_entry.name[54] = '\0'; // Terminate name with null byte
     new_file_entry.type = 'f';
     new_file_entry.block = entry_blocknum;
     new_file_entry.block.valid = true;
