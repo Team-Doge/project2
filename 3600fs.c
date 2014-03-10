@@ -55,7 +55,6 @@ int read_files_in_dir(dirent *dir, void *buf, fuse_fill_dir_t filler);
 int create_file(dirent* dir, int dirent_index, int entry_index, const char *path, mode_t mode, struct fuse_file_info *fi);
 int create_dirent(dirent *dir, const char *path, mode_t mode, struct fuse_file_info *fi);
 
-#define MIN(X,Y) ((X) < (Y) ? (X) : (Y))
 #define debug(...) ((DEBUG) ? printf(__VA_ARGS__) : -1)
 
 /*
