@@ -9,11 +9,14 @@
 #define __3600HELPER_H__
 #include "disk.h"
 #include "debug.h"
-// Helper functions for reading/writing
-int bwrite(int blocknum, void *buf);
-char* bread(int blocknum);
 
-// Helper function for writing to disk
+/**
+ * Wrapper function for writing data to disk
+ * @param  blocknum The block number to write data to
+ * @param  buf      The buffered data to write to
+ * @return          0 on success or -1 on error.
+ */
+int bwrite(int blocknum, void *buf);
 int bwrite(int blocknum, void *buf) {
     char buffer[BLOCKSIZE];
     memcpy(buffer, buf, BLOCKSIZE);
@@ -26,7 +29,15 @@ int bwrite(int blocknum, void *buf) {
     return 0;
 }
 
-// Helper function for reading from disk
+
+/**
+ * Wrapper function for reading from disk
+ * @param  blocknum The block number to read data from
+ * @return          A char* represented the data that was read in to a buffer, or NULL on failure.
+ *
+ * NOTE: The char* is calloc'd in this function, make sure to free() it when done
+ */
+char* bread(int blocknum);
 char* bread(int blocknum) {
     char* buffer;
     buffer = (char*) calloc(BLOCKSIZE, sizeof(char));
