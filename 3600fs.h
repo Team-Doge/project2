@@ -87,11 +87,6 @@ typedef struct indirect_t {
     blocknum blocks[128];
 } indirect;
 
-typedef struct {
-  long tv_sec;
-  long tv_usec;
-} timeval;
-
 // Import helper functions
 #include "helpers.h"
 #include "debug.h"
