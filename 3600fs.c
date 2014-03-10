@@ -119,7 +119,7 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
         printf("Block size: %d\n", global_vcb.blocksize);
         printf("Root:\n\tBlock: %d\n\tvalid: %d\n", global_vcb.root.index, global_vcb.root.valid);
         printf("Free:\n\tBlock: %d\n\tvalid: %d\n", global_vcb.free.index, global_vcb.free.valid);
-	printf("Disk name: %s\n", global_vcb.name);
+	    printf("Disk name: %s\n", global_vcb.name);
         printf("\n\n*** ROOT INFO ***\n");
         printf("User id: %d\n", root.user);
         printf("Group id: %d\n", root.group);
@@ -196,7 +196,9 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
         debug("Searching direct blocks.\n");
         direntry *entry = find_file_entry(root.direct, 54, path);
         if (entry != NULL) {
-            return get_file_attr(entry, stbuf);
+            int success = get_file_attr(entry, stbuf);
+            free(entry);
+            return success;
         }
 
         // ----- Step through the first layer of indirection ----- //
@@ -205,7 +207,9 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
             indirect* ind = (indirect*) bread(root.single_indirect.index);
             direntry *entry = find_file_entry(ind->blocks, 128, path);
             if (entry != NULL) {
-                return get_file_attr(entry, stbuf);
+                int success = get_file_attr(entry, stbuf);
+                free(entry);
+                return success;
             }
         }
 
@@ -225,7 +229,9 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
                 indirect* ind1 = (indirect*) bread(b2.index);
                 direntry *entry = find_file_entry(ind1->blocks, 128, path);
                 if (entry != NULL) {
-                    return get_file_attr(entry, stbuf);
+                    int success = get_file_attr(entry, stbuf);
+                    free(entry);
+                    return success;
                 }
             }
         }
@@ -975,12 +981,14 @@ static int vfs_delete(const char *path)
                         debug("\tWriting new dirent to disk.\n");
                         bwrite(b.index, d);
                         //TODO update free
+                        free(filename);
                         return 0;
                     }
                 }
             }
         } else {
             debug("\tFile not found.\n");
+            free(filename);
             return -ENOENT;
         }
     }
