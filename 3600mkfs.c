@@ -22,7 +22,6 @@
 #include <sys/time.h>
 
 #include "3600fs.h"
-#include "disk.h"
 
 void myformat(int size) {
     // Do not touch or move this function
@@ -190,17 +189,4 @@ int main(int argc, char** argv) {
     unsigned long size = atoi(argv[1]);
     printf("Formatting the disk with size %lu \n", size);
     myformat(size);
-}
-
-
-int bwrite(int blocknum, void *buf) {
-    char buffer[BLOCKSIZE];
-    memcpy(buffer, buf, BLOCKSIZE);
-    int err = dwrite(blocknum, buffer);
-    if (err < 0) {
-        printf("Error writing block %d to disk.", blocknum);
-        return -1;
-    }
-
-    return 0;
 }

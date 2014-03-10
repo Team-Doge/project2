@@ -93,6 +93,7 @@ typedef struct {
 } timeval;
 
 // Import helper functions
-#include "3600helper.h"
-
+#include "helpers.h"
+#include "debug.h"
+#include "disk.h"
 #endif
