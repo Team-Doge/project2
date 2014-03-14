@@ -1,8 +1,8 @@
-We are choosing to implement the inode file system, as it poses a challenge and provides a greater learning experience. We have the basic block implementation complete for the first three blocks (and free blocks), and plan to continue forward after drafting out a roadmap on how to tackle the remainder of the project.
+We are choosing to implement the inode file system, as it poses a challenge and provides a greater learning experience. 
 
-Currently, running 'make test' fails for unknown reasons, while simply running the './test' script has the milestone tests passing. We also tested in GDB and cannot find the error that is causing the test script to fail while running in the 'make test' environment.
+To test file creation, run the create_files.py script found in this directory. It will attempt to make 2500 files. 
 
-
+Currently, reading and writing data is not supported, but is a work in progress
 
 
 To run the code:
