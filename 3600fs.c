@@ -194,20 +194,24 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
 
         // ----- Step through the direct blocks of root dnode ----- //
         debug("Searching direct blocks.\n");
-        direntry entry;
-        bool found = find_file_entry(&entry, root.direct, 54, path);
-        if (found) {
-            return get_file_attr(&entry, stbuf);
+        dirent dir;
+        int block_index = -1;
+        int entry_index = -1;
+        bool found = find_file_entry(root.direct, 54, path, &dir, &block_index, &entry_index);
+        if (found == true && block_index >= 0 && entry_index >= 0) {
+            return get_file_attr(dir.entries[entry_index], stbuf);
         }
 
         // ----- Step through the first layer of indirection ----- //
         if (root.single_indirect.valid == true) {
             debug("Searching single indirect.\n");
             indirect* ind = (indirect*) bread(root.single_indirect.index);
-            direntry entry;
-            bool found = find_file_entry(&entry, ind->blocks, 128, path);
-            if (found) {
-                return get_file_attr(&entry, stbuf);
+            dirent dir;
+            int block_index = -1;
+            int entry_index = -1;
+            bool found = find_file_entry(ind->blocks, 128, path, &dir, &block_index, &entry_index);
+            if (found == true && block_index >= 0 && entry_index >= 0) {
+                return get_file_attr(dir.entries[entry_index], stbuf);
             }
         }
 
@@ -225,10 +229,12 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
 
                 debug("Searching %d/128 single indirect inside double.\n", i+1);
                 indirect* ind1 = (indirect*) bread(b2.index);
-                direntry entry;
-                bool found = find_file_entry(&entry, ind1->blocks, 128, path);
-                if (found) {
-                    return get_file_attr(&entry, stbuf);
+                dirent dir;
+                int block_index = -1;
+                int entry_index = -1;
+                bool found = find_file_entry(ind1->blocks, 128, path, &dir, &block_index, &entry_index);
+                if (found == true && block_index >= 0 && entry_index >= 0) {
+                    return get_file_attr(dir.entries[entry_index], stbuf);
                 }
             }
         }
@@ -239,20 +245,21 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
     return -1;
 }
 
-bool find_file_entry(direntry *entry, blocknum* blocks, int size, const char* path) {
+bool find_file_entry(blocknum *blocks, int size, const char *path, dirent *dir, int *block_index, int *entry_index) {
     debug("Looking through %d blocks for '%s'.\n", size, path);
     for (int i = 0; i < size; i++) {
         blocknum b = blocks[i];
         debug("\tBlock %d/%d in list points to block %d.\n", i+1, size, b.index);
         if (b.valid == false) {
             debug("\tBlock %d is invalid.\n", b.index);
-            entry = NULL;
             return false;
         }
 
-        dirent *dir = (dirent *) bread(b.index);
+        dirent *d = (dirent *) bread(b.index);
+        debug("\tLooking in at dirent.\n")
+        debug_dirent(d);
         for (int j = 0; j < 8; j++) {
-            direntry *e = &dir->entries[j];
+            direntry *e = &d->entries[j];
             // If it's not valid, skip it
             if (e->block.valid == true) {
                 switch (e->type) {
@@ -265,7 +272,9 @@ bool find_file_entry(direntry *entry, blocknum* blocks, int size, const char* pa
                         break;
                     case 'f':
                         if (strncmp(e->name, path+1, 55) == 0) {
-                            *entry = *e;
+                            *dir = *d;
+                            *block_index = i;
+                            *entry_index = j;
                             return true;
                         }
                         break;
@@ -281,10 +290,10 @@ bool find_file_entry(direntry *entry, blocknum* blocks, int size, const char* pa
     return false;
 }
 
-int get_file_attr(direntry *entry, struct stat *stbuf) {
+int get_file_attr(direntry entry, struct stat *stbuf) {
     // Sanity check
-    if (entry->block.valid == true) {
-        inode *file = (inode *) bread(entry->block.index);
+    if (entry.block.valid == true) {
+        inode *file = (inode *) bread(entry.block.index);
         stbuf->st_mode = file->mode | S_IFREG;
         stbuf->st_uid = file->user;
         stbuf->st_gid = file->group;
@@ -815,7 +824,7 @@ int create_file(dirent* dir, int dirent_index, int entry_index, const char *path
     new_file.access_time = current_time;
     new_file.modify_time = current_time;
     new_file.create_time = current_time;
-    new_file.size = sizeof(blocknum);
+    new_file.size = 0;
     new_file.user = getuid();
     new_file.group = getgid();
     new_file.mode = 0644;
@@ -991,8 +1000,8 @@ static int vfs_delete(const char *path)
         }
     }
 
-    // TODO
-    // Cycle through the single indirection and double indirection
+
+    return -ENOENT;
 
 
     return 0;
