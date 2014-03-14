@@ -13,15 +13,11 @@ const int DEBUG = true;
 #define ANSI_COLOR_RESET   "\x1b[0m"
 #define debug(...) \
 if (DEBUG) {\
-	fprintf(stdout, "%s", ANSI_COLOR_RESET); \
 	fprintf(stdout, __VA_ARGS__); \
-	fprintf(stdout, "%s", ANSI_COLOR_RESET);\
 }
 #define error(...) \
 if (DEBUG) {\
-	fprintf(stdout, "%s", ANSI_COLOR_RESET); \
 	fprintf(stdout, __VA_ARGS__); \
-	fprintf(stdout, "%s", ANSI_COLOR_RESET);\
 }
 
 
