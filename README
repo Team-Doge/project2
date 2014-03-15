@@ -2,7 +2,7 @@ We are choosing to implement the inode file system, as it poses a challenge and 
 
 To test file creation, run the create_files.py script found in this directory. It will attempt to make 2500 files. 
 
-Currently, reading and writing data is not supported, but is a work in progress
+Currently, reading and writing data is somewhat supported, and is a work in progress
 
 
 To run the code:
