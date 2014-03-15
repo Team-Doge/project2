@@ -101,13 +101,13 @@ void myformat(int size) {
     dot.type = 'd';
     dot.block = blocks[1];
     dot.block.valid = 1;
-    strcpy(dot.name, ".");
+    strncpy(dot.name, ".", 55);
 
     direntry dotdot;
     dotdot.type = 'd';
     dotdot.block = blocks[1];
     dotdot.block.valid = 1;
-    strcpy(dotdot.name, "..");
+    strncpy(dotdot.name, "..", 55);
 
     dirent root_dir;
     root_dir.entries[0] = dot;

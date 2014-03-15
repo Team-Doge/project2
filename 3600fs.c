@@ -1254,7 +1254,10 @@ static int vfs_rename(const char *from, const char *to)
         bool found = find_file_entry(root.direct, DIRECT_SIZE, from, &dir, &block_index, &entry_index);
         if (found == true) {
             debug("\tRenaming '%s' to '%s'\n", from, to);
-            strncpy(dir.entries[entry_index].name, to, 55);
+            strncpy(dir.entries[entry_index].name, to+1, 55);
+
+            // Always make sure the file name ends with a null byte
+            dir.entries[entry_index].name[54] = '\0';
 
             debug("\tUpdated dirent:\n");
             debug_dirent(&dir);
@@ -1268,8 +1271,80 @@ static int vfs_rename(const char *from, const char *to)
         }
     }
 
-    // Single indirection
-    // Double indirection
+   
+    // ----- Step through the first layer of indirection ----- //
+    if (root.single_indirect.valid == true) {
+        debug("Searching single indirect.\n");
+        indirect* ind = (indirect*) bread(root.single_indirect.index);
+        dirent dir;
+        int block_index = -1;
+        int entry_index = -1;
+        bool found = find_file_entry(ind->blocks, INDIRECT_SIZE, from, &dir, &block_index, &entry_index);
+        if (found == true && block_index >= 0 && entry_index >= 0) {
+            debug("\tRenaming '%s' to '%s'\n", from, to);
+            strncpy(dir.entries[entry_index].name, to+1, 55);
+
+            // Always make sure the file name ends with a null byte
+            dir.entries[entry_index].name[54] = '\0';
+
+            debug("\tUpdated dirent:\n");
+            debug_dirent(&dir);
+            // Write the updated dirent to disk
+            if (bwrite(root.direct[block_index].index, &dir) < 0) {
+                // Error
+                return -1;
+            }
+
+            free(ind);
+            return 0;
+        } else {
+            free(ind);                
+        }
+    }
+
+    // Step through the double-layer indirection if there are more blocks
+    if (root.double_indirect.valid == true) {
+        debug("Searching double indirect.\n");
+        indirect* ind2 = (indirect*) bread(root.double_indirect.index);
+
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            blocknum b2 = ind2->blocks[i];
+            if (b2.valid == false) {
+                debug("File not found.\n");
+                free(ind2);
+                return -ENOENT;
+            }
+
+            debug("Searching %d/%d single indirect inside double.\n", i+1, INDIRECT_SIZE);
+            indirect* ind1 = (indirect*) bread(b2.index);
+            dirent dir;
+            int block_index = -1;
+            int entry_index = -1;
+            bool found = find_file_entry(ind1->blocks, INDIRECT_SIZE, from, &dir, &block_index, &entry_index);
+            if (found == true && block_index >= 0 && entry_index >= 0) {
+                debug("\tRenaming '%s' to '%s'\n", from, to);
+                strncpy(dir.entries[entry_index].name, to+1, 55);
+
+                // Always make sure the file name ends with a null byte
+                dir.entries[entry_index].name[54] = '\0';
+
+                debug("\tUpdated dirent:\n");
+                debug_dirent(&dir);
+                // Write the updated dirent to disk
+                if (bwrite(root.direct[block_index].index, &dir) < 0) {
+                    // Error
+                    return -1;
+                }
+
+                free(ind1);
+                free(ind2);
+                return 0;
+            } else {
+                free(ind1);
+            }
+        }
+        free(ind2);
+    }
     
     return -1;
 }
@@ -1287,8 +1362,92 @@ static int vfs_rename(const char *from, const char *to)
 static int vfs_chmod(const char *file, mode_t mode)
 {
 
-    file = file + 0;
-    mode = mode + 0;
+    for (int i = 0; i < DIRECT_SIZE; i++) {
+        dirent dir;
+        int block_index;
+        int entry_index;
+        bool found = find_file_entry(root.direct, DIRECT_SIZE, file, &dir, &block_index, &entry_index);
+        if (found == true) {
+            inode *f = (inode *) bread(dir.entries[entry_index].block.index);
+            f->mode = mode;
+
+            if (bwrite(dir.entries[entry_index].block.index, f) < 0) {
+                // Error
+                free(f);
+                return -1;
+            }
+            free(f);
+
+            return 0;
+        }
+    }
+
+   
+    // ----- Step through the first layer of indirection ----- //
+    if (root.single_indirect.valid == true) {
+        debug("Searching single indirect.\n");
+        indirect* ind = (indirect*) bread(root.single_indirect.index);
+        dirent dir;
+        int block_index = -1;
+        int entry_index = -1;
+        bool found = find_file_entry(ind->blocks, INDIRECT_SIZE, file, &dir, &block_index, &entry_index);
+        if (found == true && block_index >= 0 && entry_index >= 0) {
+            inode *f = (inode *) bread(dir.entries[entry_index].block.index);
+            f->mode = mode;
+
+            if (bwrite(dir.entries[entry_index].block.index, f) < 0) {
+                // Error
+                free(f);
+                return -1;
+            }
+            free(f);
+
+
+            free(ind);
+            return 0;
+        } else {
+            free(ind);                
+        }
+    }
+
+    // Step through the double-layer indirection if there are more blocks
+    if (root.double_indirect.valid == true) {
+        debug("Searching double indirect.\n");
+        indirect* ind2 = (indirect*) bread(root.double_indirect.index);
+
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            blocknum b2 = ind2->blocks[i];
+            if (b2.valid == false) {
+                debug("File not found.\n");
+                free(ind2);
+                return -ENOENT;
+            }
+
+            debug("Searching %d/%d single indirect inside double.\n", i+1, INDIRECT_SIZE);
+            indirect* ind1 = (indirect*) bread(b2.index);
+            dirent dir;
+            int block_index = -1;
+            int entry_index = -1;
+            bool found = find_file_entry(ind1->blocks, INDIRECT_SIZE, file, &dir, &block_index, &entry_index);
+            if (found == true && block_index >= 0 && entry_index >= 0) {
+                inode *f = (inode *) bread(dir.entries[entry_index].block.index);
+                f->mode = mode;
+
+                if (bwrite(dir.entries[entry_index].block.index, f) < 0) {
+                    // Error
+                    free(f);
+                    return -1;
+                }
+                free(f);
+                free(ind1);
+                free(ind2);
+                return 0;
+            } else {
+                free(ind1);
+            }
+        }
+        free(ind2);
+    }
 
     return 0;
 }
@@ -1301,9 +1460,97 @@ static int vfs_chmod(const char *file, mode_t mode)
 static int vfs_chown(const char *file, uid_t uid, gid_t gid)
 {
 
-    file = file + 0;
-    uid = uid + 0;
-    gid = gid + 0;
+    for (int i = 0; i < DIRECT_SIZE; i++) {
+        dirent dir;
+        int block_index;
+        int entry_index;
+        bool found = find_file_entry(root.direct, DIRECT_SIZE, file, &dir, &block_index, &entry_index);
+        if (found == true) {
+            inode *f = (inode *) bread(dir.entries[entry_index].block.index);
+            f->user = uid;
+            f->group = gid;
+
+            if (bwrite(dir.entries[entry_index].block.index, f) < 0) {
+                // Error
+                free(f);
+                return -1;
+            }
+            free(f);
+            return 0;
+        }
+    }
+
+   
+    // ----- Step through the first layer of indirection ----- //
+    if (root.single_indirect.valid == true) {
+        debug("Searching single indirect.\n");
+        indirect* ind = (indirect*) bread(root.single_indirect.index);
+        dirent dir;
+        int block_index = -1;
+        int entry_index = -1;
+        bool found = find_file_entry(ind->blocks, INDIRECT_SIZE, file, &dir, &block_index, &entry_index);
+        if (found == true && block_index >= 0 && entry_index >= 0) {
+            inode *f = (inode *) bread(dir.entries[entry_index].block.index);
+            f->user = uid;
+            f->group = gid;
+
+            if (bwrite(dir.entries[entry_index].block.index, f) < 0) {
+                // Error
+                free(f);
+                free(ind);
+                return -1;
+            }
+            free(f);
+            free(ind);
+            return 0;
+        } else {
+            free(ind);                
+        }
+    }
+
+    // Step through the double-layer indirection if there are more blocks
+    if (root.double_indirect.valid == true) {
+        debug("Searching double indirect.\n");
+        indirect* ind2 = (indirect*) bread(root.double_indirect.index);
+
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            blocknum b2 = ind2->blocks[i];
+            if (b2.valid == false) {
+                debug("File not found.\n");
+                free(ind2);
+                return -ENOENT;
+            }
+
+            debug("Searching %d/%d single indirect inside double.\n", i+1, INDIRECT_SIZE);
+            indirect* ind1 = (indirect*) bread(b2.index);
+            dirent dir;
+            int block_index = -1;
+            int entry_index = -1;
+            bool found = find_file_entry(ind1->blocks, INDIRECT_SIZE, file, &dir, &block_index, &entry_index);
+            if (found == true && block_index >= 0 && entry_index >= 0) {
+                inode *f = (inode *) bread(dir.entries[entry_index].block.index);
+                f->user = uid;
+                f->group = gid;
+
+                if (bwrite(dir.entries[entry_index].block.index, f) < 0) {
+                    // Error
+                    free(f);
+                    free(ind1);
+                    free(ind2);
+                    return -1;
+                }
+                free(f);
+                free(ind1);
+                free(ind2);
+                return 0;
+            } else {
+                free(ind1);
+            }
+        }
+        free(ind2);
+    }
+
+    return 0;
     return 0;
 }
 
@@ -1314,8 +1561,95 @@ static int vfs_chown(const char *file, uid_t uid, gid_t gid)
 static int vfs_utimens(const char *file, const struct timespec ts[2])
 {
 
-    file = file + 0;
-    ts = ts + 0;
+
+    for (int i = 0; i < DIRECT_SIZE; i++) {
+        dirent dir;
+        int block_index;
+        int entry_index;
+        bool found = find_file_entry(root.direct, DIRECT_SIZE, file, &dir, &block_index, &entry_index);
+        if (found == true) {
+            inode *f = (inode *) bread(dir.entries[entry_index].block.index);
+            f->access_time = ts[0];
+            f->modify_time = ts[1];
+
+            if (bwrite(dir.entries[entry_index].block.index, f) < 0) {
+                // Error
+                free(f);
+                return -1;
+            }
+            free(f);
+            return 0;
+        }
+    }
+
+   
+    // ----- Step through the first layer of indirection ----- //
+    if (root.single_indirect.valid == true) {
+        debug("Searching single indirect.\n");
+        indirect* ind = (indirect*) bread(root.single_indirect.index);
+        dirent dir;
+        int block_index = -1;
+        int entry_index = -1;
+        bool found = find_file_entry(ind->blocks, INDIRECT_SIZE, file, &dir, &block_index, &entry_index);
+        if (found == true && block_index >= 0 && entry_index >= 0) {
+            inode *f = (inode *) bread(dir.entries[entry_index].block.index);
+            f->access_time = ts[0];
+            f->modify_time = ts[1];
+            
+            if (bwrite(dir.entries[entry_index].block.index, f) < 0) {
+                // Error
+                free(f);
+                return -1;
+            }
+            free(f);
+            free(ind);
+            return 0;
+        } else {
+            free(ind);                
+        }
+    }
+
+    // Step through the double-layer indirection if there are more blocks
+    if (root.double_indirect.valid == true) {
+        debug("Searching double indirect.\n");
+        indirect* ind2 = (indirect*) bread(root.double_indirect.index);
+
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            blocknum b2 = ind2->blocks[i];
+            if (b2.valid == false) {
+                debug("File not found.\n");
+                free(ind2);
+                return -ENOENT;
+            }
+
+            debug("Searching %d/%d single indirect inside double.\n", i+1, INDIRECT_SIZE);
+            indirect* ind1 = (indirect*) bread(b2.index);
+            dirent dir;
+            int block_index = -1;
+            int entry_index = -1;
+            bool found = find_file_entry(ind1->blocks, INDIRECT_SIZE, file, &dir, &block_index, &entry_index);
+            if (found == true && block_index >= 0 && entry_index >= 0) {
+                inode *f = (inode *) bread(dir.entries[entry_index].block.index);
+                f->access_time = ts[0];
+                f->modify_time = ts[1];
+                
+                if (bwrite(dir.entries[entry_index].block.index, f) < 0) {
+                    // Error
+                    free(f);
+                    return -1;
+                }
+                free(f);
+                free(ind1);
+                free(ind2);
+                return 0;
+            } else {
+                free(ind1);
+            }
+        }
+        free(ind2);
+    }
+
+    return 0;
     return 0;
 }
 
@@ -1329,8 +1663,77 @@ static int vfs_truncate(const char *file, off_t offset)
 
     /* 3600: NOTE THAT ANY BLOCKS FREED BY THIS OPERATION SHOULD
        BE AVAILABLE FOR OTHER FILES TO USE. */
-    file = file + 0;
-    offset = offset + 0;
+
+    for (int i = 0; i < DIRECT_SIZE; i++) {
+        dirent dir;
+        int block_index;
+        int entry_index;
+        bool found = find_file_entry(root.direct, DIRECT_SIZE, file, &dir, &block_index, &entry_index);
+        if (found == true) {
+            inode *f = (inode *) bread(dir.entries[entry_index].block.index);
+
+
+            return 0;
+        }
+    }
+
+   
+    // ----- Step through the first layer of indirection ----- //
+    if (root.single_indirect.valid == true) {
+        debug("Searching single indirect.\n");
+        indirect* ind = (indirect*) bread(root.single_indirect.index);
+        dirent dir;
+        int block_index = -1;
+        int entry_index = -1;
+        bool found = find_file_entry(ind->blocks, INDIRECT_SIZE, file, &dir, &block_index, &entry_index);
+        if (found == true && block_index >= 0 && entry_index >= 0) {
+            inode *f = (inode *) bread(dir.entries[entry_index].block.index);
+     
+
+
+            free(ind);
+            return 0;
+        } else {
+            free(ind);                
+        }
+    }
+
+    // Step through the double-layer indirection if there are more blocks
+    if (root.double_indirect.valid == true) {
+        debug("Searching double indirect.\n");
+        indirect* ind2 = (indirect*) bread(root.double_indirect.index);
+
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            blocknum b2 = ind2->blocks[i];
+            if (b2.valid == false) {
+                debug("File not found.\n");
+                free(ind2);
+                return -ENOENT;
+            }
+
+            debug("Searching %d/%d single indirect inside double.\n", i+1, INDIRECT_SIZE);
+            indirect* ind1 = (indirect*) bread(b2.index);
+            dirent dir;
+            int block_index = -1;
+            int entry_index = -1;
+            bool found = find_file_entry(ind1->blocks, INDIRECT_SIZE, file, &dir, &block_index, &entry_index);
+            if (found == true && block_index >= 0 && entry_index >= 0) {
+               inode *f = (inode *) bread(dir.entries[entry_index].block.index);
+
+
+
+
+                free(ind1);
+                free(ind2);
+                return 0;
+            } else {
+                free(ind1);
+            }
+        }
+        free(ind2);
+    }
+
+    return 0;
 
     return 0;
 }
