@@ -198,7 +198,7 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
         int entry_index;
         int found = search_root_for_file(path, &dirent_loc, &dir, &entry_index);
 
-        if (found > 0) {
+        if (found >= 0) {
             debug("Getting attributes for file.\n");
             get_file_attr(dir.entries[entry_index], stbuf);
             return 0;
@@ -274,8 +274,8 @@ bool find_file_entry(blocknum *blocks, int size, const char *path, blocknum *dir
         }
 
         dirent *d = (dirent *) bread(b.index);
-        debug("\tLooking in at dirent.\n")
-        debug_dirent(d);
+        debug("\tLooking in dirent.\n")
+        // debug_dirent(d);
         for (int j = 0; j < 8; j++) {
             direntry *e = &d->entries[j];
             // If it's not valid, skip it
@@ -289,6 +289,7 @@ bool find_file_entry(blocknum *blocks, int size, const char *path, blocknum *dir
                         // across this just skip it
                         break;
                     case 'f':
+                        debug("\tComparing '%s' to '%s'.\n", e->name, path+1);
                         if (strncmp(e->name, path+1, 55) == 0) {
                             *dirent_loc = b;
                             *dir = *d;
@@ -958,12 +959,12 @@ static int vfs_read(const char *path, char *buf, size_t size, off_t offset,
     blocknum dirent_loc;
     dirent dir;
     int entry_index;
-    int found = search_root_for_file(file, &dirent_loc, &dir, &entry_index);
+    int found = search_root_for_file(path, &dirent_loc, &dir, &entry_index);
 
-    if (found > 0) {
+    if (found >= 0) {
         debug("Reading data from file '%s'.\n", path);
-        blocknum file_loc = dir.entries[entry_index].block.index;
-        inode *file = (inode *) bread(file_loc);
+        blocknum file_loc = dir.entries[entry_index].block;
+        inode *file = (inode *) bread(file_loc.index);
         int read = read_from_file(file, buf, size, offset);
         return read;
     }
@@ -1041,12 +1042,12 @@ static int vfs_write(const char *path, const char *buf, size_t size,
     blocknum dirent_loc;
     dirent dir;
     int entry_index;
-    int found = search_root_for_file(file, &dirent_loc, &dir, &entry_index);
+    int found = search_root_for_file(path, &dirent_loc, &dir, &entry_index);
 
-    if (found > 0) {
+    if (found >= 0) {
         debug("Writng to '%s'.\n", path);
-        blocknum file_loc = dir.entries[entry_index].block.index;
-        inode *file = (inode *) bread(file_loc);
+        blocknum file_loc = dir.entries[entry_index].block;
+        inode *file = (inode *) bread(file_loc.index);
         int total = write_to_file(file, buf, size, offset);
 
         // Update file size
@@ -1055,7 +1056,7 @@ static int vfs_write(const char *path, const char *buf, size_t size,
         }
 
         // Update on disk
-        if (bwrite(file_loc, file) < 0) {
+        if (bwrite(file_loc.index, file) < 0) {
             // Error writing to disk
             error("Error writing data for file to disk.\n");
             return -1;
@@ -1184,9 +1185,9 @@ static int vfs_delete(const char *path)
     blocknum dirent_loc;
     dirent dir;
     int entry_index;
-    int found = search_root_for_file(from, &dirent_loc, &dir, &entry_index);
+    int found = search_root_for_file(path, &dirent_loc, &dir, &entry_index);
 
-    if (found > 0) {
+    if (found >= 0) {
         dir.entries[entry_index].block.valid = false;
         // TODO
         // Reclaim blocks from the file as free
@@ -1217,7 +1218,7 @@ static int vfs_rename(const char *from, const char *to)
     int entry_index;
     int found = search_root_for_file(from, &dirent_loc, &dir, &entry_index);
 
-    if (found > 0) {
+    if (found >= 0) {
         debug("Renaming '%s' to '%s'.\n", from, to+1);
         // TODO
         // If we support multiple directories, this won't work
@@ -1254,13 +1255,13 @@ static int vfs_chmod(const char *file, mode_t mode)
     int entry_index;
     int found = search_root_for_file(file, &dirent_loc, &dir, &entry_index);
 
-    if (found > 0) {
-        debug("Updating permissions for '%s'.\n");
-        blocknum file_loc = dir.entries[entry_index].block.index;
-        inode *file = (inode *) bread(file_loc);
+    if (found >= 0) {
+        debug("Updating permissions for '%s'.\n", file);
+        blocknum file_loc = dir.entries[entry_index].block;
+        inode *file = (inode *) bread(file_loc.index);
         file->mode = (mode & 0x0000ffff);
 
-        if (bwrite(file_loc, file) < 0) {
+        if (bwrite(file_loc.index, file) < 0) {
             // Error writing to disk
             error("Error writing modified permissions for file to disk.\n");
             return -1;
@@ -1285,14 +1286,14 @@ static int vfs_chown(const char *file, uid_t uid, gid_t gid)
     int entry_index;
     int found = search_root_for_file(file, &dirent_loc, &dir, &entry_index);
 
-    if (found > 0) {
+    if (found >= 0) {
         debug("Updating owners for '%s'.\n", file);
-        blocknum file_loc = dir.entries[entry_index].block.index;
-        inode *file = (inode *) bread(file_loc);
-        file->uid = uid;
-        file->gid = gid;
+        blocknum file_loc = dir.entries[entry_index].block;
+        inode *file = (inode *) bread(file_loc.index);
+        file->user = uid;
+        file->group = gid;
 
-        if (bwrite(file_loc, file) < 0) {
+        if (bwrite(file_loc.index, file) < 0) {
             // Error writing to disk
             error("Error writing modified owners for file to disk.\n");
             return -1;
@@ -1315,16 +1316,16 @@ static int vfs_utimens(const char *file, const struct timespec ts[2])
     blocknum dirent_loc;
     dirent dir;
     int entry_index;
-    int found = search_root_for_file(from, &dirent_loc, &dir, &entry_index);
+    int found = search_root_for_file(file, &dirent_loc, &dir, &entry_index);
 
-    if (found > 0) {
+    if (found >= 0) {
         debug("Updating time for '%s'.\n", file);
-        blocknum file_loc = dir.entries[entry_index].block.index;
-        inode *file = (inode *) bread(file_loc);
+        blocknum file_loc = dir.entries[entry_index].block;
+        inode *file = (inode *) bread(file_loc.index);
         file->access_time = ts[0];
         file->modify_time = ts[1];
 
-        if (bwrite(file_loc, file) < 0) {
+        if (bwrite(file_loc.index, file) < 0) {
             // Error writing to disk
             error("Error writing modified permissions for file to disk.\n");
             return -1;
@@ -1352,14 +1353,15 @@ static int vfs_truncate(const char *file, off_t offset)
     int entry_index;
     int found = search_root_for_file(file, &dirent_loc, &dir, &entry_index);
 
-    if (found > 0) {
+    if (found >= 0) {
         debug("Updating permissions for '%s'.\n", file);
-        blocknum file_loc = dir.entries[entry_index].block.index;
-        inode *file = (inode *) bread(file_loc);
+        blocknum file_loc = dir.entries[entry_index].block;
+        inode *file = (inode *) bread(file_loc.index);
 
         // DO THINGS TO FILE
+        offset = offset;
 
-        if (bwrite(file_loc, file) < 0) {
+        if (bwrite(file_loc.index, file) < 0) {
             // Error writing to disk
             error("Error writing modified permissions for file to disk.\n");
             return -1;
