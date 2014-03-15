@@ -4,7 +4,7 @@
 /**
  * Represents the location of a block on disk.
  *
- * int index        The block number location on disk
+ * int  index        The block number location on disk
  * bool valid    Whether or not there is data at the location on disk
  *                      false - Free to write to, no data
  *                      true  - Data exists
@@ -19,12 +19,12 @@ typedef struct blocknum_t {
  * Represents the VCB of the file system. Viewed as the 'master' block that has the location
  * of the root directory on disk and where the free blocks are
  *
- * int      magic       The magic number of our disk. Checked on disk mount to make sure the disk is
- *                      formatted properly
- * int      blocksize   The number of bytes each block takes up on disk
- * blocknum root        The block location of the root directory on disk
- * blocknum free        The block location of where the free blocks begin on disk
- * char*    name        The name of the disk
+ * int          magic       The magic number of our disk. Checked on disk mount to make sure the disk is
+ *                              formatted properly
+ * int          blocksize   The number of bytes each block takes up on disk
+ * blocknum     root        The block location of the root directory on disk
+ * blocknum     free        The block location of where the free blocks begin on disk
+ * char        *name        The name of the disk
  */
 typedef struct vcb_s {
     int magic;
@@ -75,7 +75,7 @@ typedef struct indirect_t {
  * timespec     access_time     The last time the file was accessed
  * timespec     modify_time     The last time the file was modified
  * timespec     create_time     The time when the file was created
- * blocknum*    direct  A listing of blocknums that point to blocks on disk that contain data blocks
+ * blocknum    *direct  A listing of blocknums that point to blocks on disk that contain data blocks
  * blocknum     single_indirect The block location of the single indirect block
  * blocknum     double_indirect The block location of the double indirect block
  */
@@ -103,7 +103,7 @@ typedef struct inode_t {
  * timespec     access_time     The last time the directory was accessed
  * timespec     modify_time     The last time the directory was modified
  * timespec     create_time     The time when the directory was created
- * blocknum*    direct  A listing of blocknums that point to blocks on disk that contain dirents
+ * blocknum    *direct          A listing of blocknums that point to blocks on disk that contain dirents
  * blocknum     single_indirect The block location of the single indirect block
  * blocknum     double_indirect The block location of the double indirect block
  */
@@ -124,7 +124,7 @@ typedef struct dnode_t {
 /**
  * Represents a entry in the filesystem.
  *
- * char*    name    The name of the file on disk
+ * char    *name   The name of the file on disk
  * char     type    The type of file on disk
  *                      f - Represents a file
  *                      d - Represents a directory
@@ -141,10 +141,20 @@ typedef struct direntry_t {
 /**
  * Represents a list of entries in the filesystem.
  *
- * direntry*    entries     A list of direntry's
+ * direntry    *entries     A list of direntry's
  */
 typedef struct dirent_t {
     direntry entries[8];
 } dirent;
+
+
+/**
+ * Represents a block of data for a file
+ *
+ * char     *data   The data in the file
+ */
+typedef struct db_t {
+    char data[512];
+} db;
 
 #endif

@@ -60,8 +60,10 @@ char* bread(int blocknum) {
  * @return              Whether or not the file was found
  */
 bool find_file_entry(blocknum *blocks, int size, const char *path, dirent *dir, int *block_index, int *entry_index);
-
-
+int write_to_file(inode *file, const char *buf, size_t size, off_t offset);
+int write_data_to_block(blocknum block, off_t offset, const char *buf);
+int read_from_file(inode *file, char *buf, size_t size, off_t offset);
+int read_from_block(blocknum block, off_t offset, char *buf, int buf_pos, size_t size);
 int get_file_attr(direntry entry, struct stat *stbuf);
 
 // Helper functions for dealing with dirents
