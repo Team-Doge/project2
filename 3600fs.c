@@ -288,7 +288,7 @@ bool find_file_entry(blocknum *blocks, int size, const char *path, blocknum *dir
                         // across this just skip it
                         break;
                     case 'f':
-                        debug("\tComparing '%s' to '%s'.\n", e->name, path+1);
+                        // debug("\tComparing '%s' to '%s'.\n", e->name, path+1);
                         if (strncmp(e->name, path+1, 55) == 0) {
                             *dirent_loc = b;
                             *dir = *d;
@@ -1010,44 +1010,78 @@ int read_from_file(inode *file, char *buf, size_t size, off_t offset) {
     int total_bytes_read = 0;
     debug("\tBytes to read: %d.\n", (int) size);
     // Go through the direct blocks
-    for (int i = 0; i < DIRECT_SIZE; i++) {
-        debug("\t\tTotal bytes read so far: %d\n", total_bytes_read);
-        blocknum b = file->direct[i];
-        if (b.valid == false) {
-           return total_bytes_read;
-        } else {
-            if (offset >= BLOCKSIZE) {
-                offset = offset - BLOCKSIZE;
-                continue;
-            } else {
-                int read = read_from_block(b, offset, buf, total_bytes_read, size);
-                if (read < 0) {
-                    // error
-                }
-                total_bytes_read += read;
+    int direct_read = read_from_block_list(file->direct, DIRECT_SIZE, &offset, buf, total_bytes_read, size);
+    total_bytes_read += direct_read;
+    if ((unsigned) total_bytes_read == size) {
+        return total_bytes_read;
+    }
+
+    // Single indirection
+    if (file->single_indirect.valid == true) {
+        indirect *single = (indirect *) bread(file->single_indirect.index);
+        int single_read = read_from_block_list(single->blocks, INDIRECT_SIZE, &offset, buf, total_bytes_read, size);
+        free(single);
+        total_bytes_read += single_read;
+        if ((unsigned) total_bytes_read == size) {
+            return total_bytes_read;
+        }
+    }
+
+    // Double indirection
+    if (file->double_indirect.valid == true) {
+        indirect *double_ind = (indirect *) bread(file->double_indirect.index) ;
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            blocknum b = double_ind->blocks[i];
+            if (b.valid == true) {
+                // Read in the single in the double
+                indirect *single_ind = (indirect *) bread(b.index);
+                int single_read = read_from_block_list(single_ind->blocks, INDIRECT_SIZE, &offset, buf, total_bytes_read, size);
+                free(single_ind);
+                total_bytes_read += single_read;
                 if ((unsigned) total_bytes_read == size) {
-                    break;
+                    return total_bytes_read;
                 }
             }
         }
     }
 
-    // Single indirection
-    // Double indirection
+    return total_bytes_read;
+}
+
+int read_from_block_list(blocknum *blocks, int list_size, off_t *offset, char *buf, int buf_pos, size_t size) {
+    int total_bytes_read = 0;
+    for (int i = 0; i < list_size; i++) {
+        debug("Reading data block %d/%d.\n", i+1, list_size);
+        blocknum b = blocks[i];
+        if (b.valid == false) {
+            // Nothing more to read
+            return total_bytes_read;
+        }
+        int read = read_from_block(b, offset, buf, buf_pos + total_bytes_read, size);
+        total_bytes_read += read;
+        if ((unsigned) total_bytes_read == size) {
+            return total_bytes_read;
+        }
+    }
 
     return total_bytes_read;
 }
 
-int read_from_block(blocknum block, off_t offset, char *buf, int buf_pos, size_t size) {
+int read_from_block(blocknum block, off_t *offset, char *buf, int buf_pos, size_t size) {
     int total_bytes_read = 0;
     db *data = (db *) bread(block.index);
-
-    debug("\t\tReading data...\n");
-    for (int i = 0; (i + offset) < BLOCKSIZE && (unsigned) i < size; i++) {
-        int position = offset + i;
-        buf[i + buf_pos] = data->data[position];
-        debug("Read '%c' from data block.\n", data->data[position]);
+    for (int i = 0; i < BLOCKSIZE; i++) {
+        if (*offset > 0) {
+            *offset = *offset - 1;
+            continue;
+        }
+        int position = i + buf_pos;
+        buf[position] = data->data[i];
         total_bytes_read++;
+        if ((unsigned) (total_bytes_read + buf_pos) == size) {
+            free(data);
+            return total_bytes_read;
+        }
     }
     free(data);
     return total_bytes_read;
@@ -1106,7 +1140,7 @@ int write_to_file(inode *file, const char *buf, size_t size, off_t offset) {
     int total_bytes_written = 0;
     debug("\tBytes to write: %d.\n", (int) size);
     // Go through the direct blocks
-    int direct_written = write_data_to_block_list(file->direct, 54, size, offset, buf);
+    int direct_written = write_data_to_block_list(file->direct, DIRECT_SIZE, size, &offset, buf, total_bytes_written);
     total_bytes_written += direct_written;
     if (direct_written < 0) {
         // We ran out of space most likely
@@ -1117,26 +1151,176 @@ int write_to_file(inode *file, const char *buf, size_t size, off_t offset) {
         return total_bytes_written;
     }
 
+    // Invalid block for creating new indirects
+    blocknum invalid;
+    invalid.index = -1;
+    invalid.valid = false;
+
     // Single indirect
+    int single_written = 0;
+    if (file->single_indirect.valid == true) {
+        indirect *single = (indirect *) bread(file->single_indirect.index);
+        int written = write_data_to_block_list(single->blocks, INDIRECT_SIZE, size, &offset, buf, total_bytes_written);
+        single_written += written;
+        free(single);
+    } else {
+        // Create the first indirect
+        blocknum single_loc;
+        single_loc.index = global_vcb.free.index;
+        single_loc.valid = true;
+        freeb *f = (freeb *) bread(global_vcb.free.index);
+        global_vcb.free = f->next;
+        if (bwrite(0, &global_vcb) < 0) {
+            error("Error writing updated VCB to disk.\n");
+        }
+
+        indirect single;
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            single.blocks[i] = invalid;
+        }
+        int written = write_data_to_block_list(single.blocks, INDIRECT_SIZE, size, &offset, buf, total_bytes_written);
+        single_written += written;
+        file->single_indirect = single_loc;
+        free(f);
+    }
+    if (single_written < 0) {
+        // We ran out of space most likely
+        return single_written;
+    } else if ((unsigned) (total_bytes_written + single_written) == size) {
+        // We finished writing
+        return total_bytes_written + single_written;
+    }
+    total_bytes_written += single_written;
 
     // Double indirect
+    int double_written = 0;
+    if (file->double_indirect.valid == true) {
+        indirect *double_ind = (indirect *) bread(file->double_indirect.index);
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            blocknum b = double_ind->blocks[i];
+            if (b.valid == true) {
+                indirect *single_ind = (indirect *) bread(b.index);
+                int written = write_data_to_block_list(single_ind->blocks, INDIRECT_SIZE, size, &offset, buf, total_bytes_written + double_written);
+                free(single_ind);
+                if (written < 0) {
+                    // Ran out of space or error
+                    return written;
+                }
+                double_written += written;
+            } else {
+                // Create a single indirect
+                blocknum single_loc;
+                single_loc.index = global_vcb.free.index;
+                single_loc.valid = true;
+                freeb *f = (freeb *) bread(global_vcb.free.index);
+                global_vcb.free = f->next;
+                if (bwrite(0, &global_vcb) < 0) {
+                    error("Error writing updated VCB to disk.\n");
+                }
 
+                blocknum invalid;
+                invalid.index = -1;
+                invalid.valid = false;
+                indirect single;
+                for (int i = 0; i < INDIRECT_SIZE; i++) {
+                    single.blocks[i] = invalid;
+                }
+                int written = write_data_to_block_list(single.blocks, INDIRECT_SIZE, size, &offset, buf, total_bytes_written + double_written);
+                free(f);
+                double_ind->blocks[i] = single_loc;
+                if (written < 0) {
+                    // Ran out of space or error
+                    // Save the double to disk first because of the new single
+                    if (bwrite(file->double_indirect.index, double_ind) < 0) {
+                        error("Error updating double indirect on disk.\n");
+                    }
+                    return written;
+                } else if ((unsigned) (total_bytes_written + double_written + written) == size) {
+                    // We're done writing
+                    // Save the double to disk because of the new single
+                    if (bwrite(file->double_indirect.index, double_ind) < 0) {
+                        error("Error updating double indirect on disk.\n");
+                    }
+                    return total_bytes_written + double_written + written;
+                }
+                double_written += written;
 
-    return total_bytes_written;
+            }
+        }
+    } else {
+        // Create the second indirect location
+        blocknum double_loc;
+        double_loc.index = global_vcb.free.index;
+        double_loc.valid = true;
+        freeb *double_free = (freeb *) bread(global_vcb.free.index);
+        global_vcb.free = double_free->next;
+        if (bwrite(0, &global_vcb) < 0) {
+            error("Error writing updated VCB to disk.\n");
+        }
+        file->double_indirect = double_loc;
+
+        // Create the second indirect block with invalid blocks
+        indirect double_ind;
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            double_ind.blocks[i] = invalid;
+        }
+
+        // Writing data to the double indirect
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            // Create a single indirect
+            blocknum single_loc;
+            single_loc.index = global_vcb.free.index;
+            single_loc.valid = true;
+            freeb *f = (freeb *) bread(global_vcb.free.index);
+            global_vcb.free = f->next;
+            if (bwrite(0, &global_vcb) < 0) {
+                error("Error writing updated VCB to disk.\n");
+            }
+
+            blocknum invalid;
+            invalid.index = -1;
+            invalid.valid = false;
+            indirect single;
+            for (int i = 0; i < INDIRECT_SIZE; i++) {
+                single.blocks[i] = invalid;
+            }
+            int written = write_data_to_block_list(single.blocks, INDIRECT_SIZE, size, &offset, buf, total_bytes_written + double_written);
+            free(f);
+            double_ind.blocks[i] = single_loc;
+            if (written < 0) {
+                // Ran out of space or error
+                // Save the double to disk first because of the new single
+                if (bwrite(file->double_indirect.index, &double_ind) < 0) {
+                    error("Error updating double indirect on disk.\n");
+                }
+                return written;
+            } else if ((unsigned) (total_bytes_written + double_written + written) == size) {
+                // We're done writing
+                // Save the double to disk first because of the new single
+                if (bwrite(file->double_indirect.index, &double_ind) < 0) {
+                    error("Error updating double indirect on disk.\n");
+                }
+                return total_bytes_written + double_written + written;
+            }
+            double_written += written;
+        }
+    }
+
+    return total_bytes_written + double_written;
 }
 
-int write_data_to_block_list(blocknum *blocks, int list_size, int size, off_t offset, const char *buf) {
+int write_data_to_block_list(blocknum *blocks, int list_size, int size, off_t *offset, const char *buf, int buf_pos) {
     int total_bytes_written = 0;
     debug("Writing to a potential %d blocks for file.\n", list_size);
     for (int i = 0; i < list_size; i++) {
-        debug("\tWriting to block %d/%d.\n", i, list_size);
+        debug("\tWriting to block %d/%d.\n", i+1, list_size);
         blocknum b = blocks[i];
         if (b.valid == true) {
             // Write data to existing block
             db *data = (db *) bread(b.index);
             size_t data_size = strnlen(data->data, BLOCKSIZE);
             if (data_size < (unsigned) BLOCKSIZE) {
-                int written = write_data_to_block(data, &offset, size, buf, total_bytes_written);
+                int written = write_data_to_block(data, offset, size, buf, total_bytes_written + buf_pos);
                 total_bytes_written += written;
 
                 // Update the file on disk
@@ -1150,7 +1334,7 @@ int write_data_to_block_list(blocknum *blocks, int list_size, int size, off_t of
                     return total_bytes_written;
                 }
             } else {
-                offset = offset - BLOCKSIZE;
+                *offset = *offset - BLOCKSIZE;
             } 
             free(data);
         } else {
@@ -1175,7 +1359,7 @@ int write_data_to_block_list(blocknum *blocks, int list_size, int size, off_t of
             for (int i = 0; i < BLOCKSIZE; i++) {
                 data.data[i] = '\0';
             }
-            int written = write_data_to_block(&data, &offset, size, buf, total_bytes_written);
+            int written = write_data_to_block(&data, offset, size, buf, total_bytes_written + buf_pos);
             total_bytes_written += written;
             debug_data(&data);
             if (bwrite(data_loc.index, &data) < 0) {
@@ -1209,33 +1393,7 @@ int write_data_to_block(db *data, off_t *offset, int size, const char *buf, int 
     return written;
 
 }
-/*
-int write_data_to_block(blocknum block, off_t offset, const char *buf) {
-    int total_written = 0;
-    db data;
-    // Make sure we have a clean data block
-    for (int i = 0; i < BLOCKSIZE; i++) {
-        data.data[i] = '\0';
-    }
-    debug("\t\tWriting bytes for offset.\n");
-    for (int i = 0; i < offset && i < BLOCKSIZE; i++) {
-        data.data[i] = '0';
-    }
-    debug("\t\tWriting data from buffer.\n");
-    for (int i = 0; i < (BLOCKSIZE - offset) && (unsigned) i < strlen(buf); i++) {
-        int position = offset + i;
-        data.data[position] = buf[i];
-        total_written++;
-    }
 
-    if (bwrite(block.index, &data) < 0) {
-        debug("Error writing data to block %d.\n", block.index);
-        return -1;
-    }
-
-    return total_written;
-}
-*/
 /**
  * This function deletes the last component of the path (e.g., /a/b/c you 
  * need to remove the file 'c' from the directory /a/b).
@@ -1254,18 +1412,60 @@ static int vfs_delete(const char *path)
 
     if (found >= 0) {
         dir.entries[entry_index].block.valid = false;
-        // TODO
-        // Reclaim blocks from the file as free
         if (bwrite(dirent_loc.index, &dir) < 0) {
             // Error writing to disk
             error("Error writing deleted file in dirent to disk.\n");
             return -1;
         }
 
+        // Reclaim blocks as free
+        inode *file = (inode *) bread(dir.entries[entry_index].block.index);
+        // Reclaim direct blocks
+        add_block_list_to_free_list(file->direct, DIRECT_SIZE);
+        if (file->single_indirect.valid) {
+            indirect *single = (indirect *) bread(file->single_indirect.index);
+            add_block_list_to_free_list(single->blocks, INDIRECT_SIZE);            
+        }
+        if (file->double_indirect.valid) {
+            indirect *double_ind = (indirect *) bread(file->double_indirect.index);
+            for (int i = 0; i < INDIRECT_SIZE; i++) {
+                blocknum b = double_ind->blocks[i];
+                if (b.valid == true) {
+                    indirect *single_ind = (indirect *) bread(b.index);
+                    add_block_list_to_free_list(single_ind->blocks, INDIRECT_SIZE);
+                }
+            }
+        }
+
+        add_block_to_free_list(dir.entries[entry_index].block);
+
         return 0;
     }
 
     return -ENOENT;
+}
+
+void add_block_list_to_free_list(blocknum *blocks, int size) {
+    for (int i = 0; i < size; i++) {
+        blocknum b = blocks[i];
+        if (b.valid == true) {
+            add_block_to_free_list(b);
+        }
+    }
+}
+
+void add_block_to_free_list(blocknum block) {
+    freeb f;
+    f.next = global_vcb.free;
+    block.valid = false;
+    global_vcb.free = block;
+    if (bwrite(0, &global_vcb) < 0) {
+        error("Error updating VCB on disk.\n");
+    }
+    if (bwrite(block.index, &f) < 0) {
+        error("Error updating free block on disk.\n");
+    }
+    debug("Successfully reclaimed block %d.\n", block.index);
 }
 
 /*
@@ -1421,12 +1621,10 @@ static int vfs_truncate(const char *file, off_t offset)
     if (found >= 0) {
         debug("Updating permissions for '%s'.\n", file);
         blocknum file_loc = dir.entries[entry_index].block;
-        inode *file = (inode *) bread(file_loc.index);
-
-        // DO THINGS TO FILE
-        offset = offset;
-
-        if (bwrite(file_loc.index, file) < 0) {
+        inode *f = (inode *) bread(file_loc.index);
+        truncate_file(f, offset);
+        f->size = offset;
+        if (bwrite(file_loc.index, f) < 0) {
             // Error writing to disk
             error("Error writing modified permissions for file to disk.\n");
             return -1;
@@ -1435,10 +1633,83 @@ static int vfs_truncate(const char *file, off_t offset)
         return 0;
     }
 
-    return -1;
-
 
     return 0;
+}
+
+void truncate_file(inode *file, off_t offset) {
+    // Cut in the direct blocks?
+    for (int i = 0; i < DIRECT_SIZE; i++) {
+        blocknum b = file->direct[i];
+        if (b.valid == true) {
+            if (offset <= 0) {
+                // Delete the block
+                file->direct[i].valid = false;
+                add_block_to_free_list(b);
+            } else {
+                offset = offset - BLOCKSIZE;                
+            }
+        } else {
+            // Invalid blocks, no more data
+            return;
+        }
+
+    }
+
+    // Single indirection
+    if (file->single_indirect.valid == true) {
+        indirect *single = (indirect *) bread(file->single_indirect.index);
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            blocknum b = single->blocks[i];
+            if (b.valid == true) {
+                if (offset <= 0) {
+                    // Delete the block
+                    single->blocks[i].valid = false;
+                    add_block_to_free_list(b);
+                }  else {
+                    offset = offset - BLOCKSIZE;
+                }             
+            } else {
+                // Invalid blocks, no more data
+                return;
+            }
+        }
+        // Write the updated single indirect to disk
+        if (bwrite(file->single_indirect.index, single) < 0) {
+            error("Error deleting blocks in single indirect.\n");
+        }
+        free(single);
+    }
+
+    // Double indirection
+    if (file->double_indirect.valid == true) {
+        indirect *double_ind = (indirect *) bread(file->double_indirect.index);
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            blocknum b = double_ind->blocks[i];
+            if (b.valid == true) {
+                indirect *single_ind = (indirect *) bread(b.index);
+                for (int j = 0; j < INDIRECT_SIZE; j++) {
+                    blocknum s = single_ind->blocks[j];
+                    if (s.valid == true) {
+                        if (offset <= 0) {
+                            // Delete the block
+                            single_ind->blocks[j].valid = false;
+                        } else {
+                            offset = offset - BLOCKSIZE;
+                        }
+                    } else {
+                        // Invalid blocks, no more data
+                        return;
+                    }
+                }
+                if (bwrite(b.index, single_ind) < 0) {
+                    error("Error deleting single indirect in double indirect.\n");
+                }
+                free(single_ind);
+            }
+        }
+        free(double_ind);
+    }
 }
 
 

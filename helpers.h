@@ -62,14 +62,17 @@ char* bread(int blocknum) {
 bool find_file_entry(blocknum *blocks, int size, const char *path, blocknum *dir_loc, dirent *dir, int *entry_index);
 int write_to_file(inode *file, const char *buf, size_t size, off_t offset);
 int read_from_file(inode *file, char *buf, size_t size, off_t offset);
-int read_from_block(blocknum block, off_t offset, char *buf, int buf_pos, size_t size);
+int read_from_block(blocknum block, off_t *offset, char *buf, int buf_pos, size_t size);
 int get_file_attr(direntry entry, struct stat *stbuf);
 
-int write_data_to_block_list(blocknum *blocks, int list_size, int size, off_t offset, const char *buf);
+int write_data_to_block_list(blocknum *blocks, int list_size, int size, off_t *offset, const char *buf, int buf_pos);
 int write_data_to_block(db *data, off_t *offset, int size, const char *buf, int buf_pos);
 
+int read_from_block_list(blocknum *blocks, int list_size, off_t *offset, char *buf, int buf_pos, size_t size);
 
-
+void add_block_list_to_free_list(blocknum *blocks, int size);
+void add_block_to_free_list(blocknum block);
+void truncate_file(inode *file, off_t offset);
 int search_root_for_file(const char *path, blocknum *dirent_loc, dirent *dir, int *entry_index);
 // Helper functions for dealing with dirents
 // int find_file_attr(dirent *dir, const char *path, struct stat *stbuf);
