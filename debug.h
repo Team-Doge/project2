@@ -13,7 +13,7 @@ const int DEBUG = true;
 #define ANSI_COLOR_RESET   "\x1b[0m"
 #define debug(...) \
 if (DEBUG) {\
-	fprintf(stderr, __VA_ARGS__); \
+	fprintf(stdout, __VA_ARGS__); \
 }
 #define error(...) \
 if (DEBUG) {\
@@ -29,6 +29,7 @@ void debug_inode(inode* i);
 void debug_dnode(dnode* d);
 void debug_vcb(vcb* v);
 void debug_freeb(freeb* f);
+void debug_data(db* data);
 
 void debug_vcb(vcb* v) {
     debug("VCB information\n");
@@ -103,5 +104,12 @@ void debug_block(blocknum* b) {
 void debug_freeb(freeb* f) {
     debug("Free block information about NEXT free block:\n");
     debug_block(&f->next);
+}
+
+void debug_data(db *data) {
+    debug("Info in data block:\n");
+    for (int i = 0; i < 512; i++) {
+        printf("%c", data->data[i]);
+    }
 }
 #endif

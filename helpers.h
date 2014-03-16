@@ -61,11 +61,12 @@ char* bread(int blocknum) {
  */
 bool find_file_entry(blocknum *blocks, int size, const char *path, blocknum *dir_loc, dirent *dir, int *entry_index);
 int write_to_file(inode *file, const char *buf, size_t size, off_t offset);
-int write_data_to_block(blocknum block, off_t offset, const char *buf);
 int read_from_file(inode *file, char *buf, size_t size, off_t offset);
 int read_from_block(blocknum block, off_t offset, char *buf, int buf_pos, size_t size);
 int get_file_attr(direntry entry, struct stat *stbuf);
 
+int write_data_to_block_list(blocknum *blocks, int list_size, int size, off_t offset, const char *buf);
+int write_data_to_block(db *data, off_t *offset, int size, const char *buf, int buf_pos);
 
 
 

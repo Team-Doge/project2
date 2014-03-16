@@ -850,6 +850,11 @@ int create_file(dirent *dir, blocknum dir_loc, int entry_index, const char *path
     current_time.tv_sec = ctval.tv_sec;
     current_time.tv_nsec = ctval.tv_usec * 1000;
 
+    // Set dumb data for new files
+    blocknum invalid_block;
+    invalid_block.index = -1;
+    invalid_block.valid = false;
+
     // Create the inode
     debug("Creating file inode.\n");
     inode file;
@@ -860,6 +865,11 @@ int create_file(dirent *dir, blocknum dir_loc, int entry_index, const char *path
     file.user = getuid();
     file.group = getgid();
     file.mode = mode;
+    file.single_indirect = invalid_block;
+    file.double_indirect = invalid_block;
+    for (int i = 0; i < DIRECT_SIZE; i++) {
+        file.direct[i] = invalid_block;
+    }
 
     // Setup the file location
     blocknum file_loc;
@@ -1096,72 +1106,84 @@ int write_to_file(inode *file, const char *buf, size_t size, off_t offset) {
     int total_bytes_written = 0;
     debug("\tBytes to write: %d.\n", (int) size);
     // Go through the direct blocks
-    for (int i = 0; i < DIRECT_SIZE; i++) {
-        debug("\t\tTotal bytes written so far: %d\n", total_bytes_written);
-        blocknum b = file->direct[i];
-        if (b.valid == false) {
-            // Allocate new block(s)
-            debug("\t\tAllocating new block for data.\n");
+    int direct_written = write_data_to_block_list(file->direct, 54, size, offset, buf);
+    total_bytes_written += direct_written;
+    if (direct_written < 0) {
+        // We ran out of space most likely
+        return direct_written;
+    } else if ((unsigned) total_bytes_written == size) {
+        // We finished writing
+        debug("Successfully finished writing.\n");
+        return total_bytes_written;
+    }
 
-            // Make sure there is memory left
+    // Single indirect
+
+    // Double indirect
+
+
+    return total_bytes_written;
+}
+
+int write_data_to_block_list(blocknum *blocks, int list_size, int size, off_t offset, const char *buf) {
+    int total_bytes_written = 0;
+    debug("Writing to a potential %d blocks for file.\n", list_size);
+    for (int i = 0; i < list_size; i++) {
+        debug("\tWriting to block %d/%d.\n", i, list_size);
+        blocknum b = blocks[i];
+        if (b.valid == true) {
+            // Write data to existing block
+            db *data = (db *) bread(b.index);
+            size_t data_size = strnlen(data->data, BLOCKSIZE);
+            if (data_size < (unsigned) BLOCKSIZE) {
+                int written = write_data_to_block(data, &offset, size, buf, total_bytes_written);
+                total_bytes_written += written;
+
+                // Update the file on disk
+                if (bwrite(b.index, data) < 0) {
+                    error("Error updating data on disk.\n");
+                }
+
+                // Check to see if we're done writing
+                if (total_bytes_written == size) {
+                    free(data);
+                    return total_bytes_written;
+                }
+            } else {
+                offset = offset - BLOCKSIZE;
+            } 
+            free(data);
+        } else {
+
+            // Make sure there's space for more data
             if (global_vcb.free.valid == true) {
-                // Out of memory
                 return -ENOSPC;
             }
-            
-            // ----- Read the free block into memory so we can update for the next one ----- //
-            freeb* free_block = (freeb*) bread(global_vcb.free.index);
-            blocknum new_data;
-            new_data.index = global_vcb.free.index;
-            new_data.valid = true;
 
-            // ----- Update the free block of the VCB ----- //
-           // debug("\tPrevious free block index: %d\n", global_vcb.free.index);
-            global_vcb.free = free_block->next;
-           // debug("\tSet new free block on VCB at %d\n", global_vcb.free.index);
-           // debug("\tWriting updated VCB to disk...");
-            // ----- Write the updated VCB to disk ----- //
+            // Write data to a new block
+            blocknum data_loc;
+            data_loc.valid = true;
+            data_loc.index = global_vcb.free.index;
+            freeb *f = (freeb *) bread(global_vcb.free.index);
+            global_vcb.free = f->next;
+            free(f);
             if (bwrite(0, &global_vcb) < 0) {
-                debug("Error updating VCB on disk.\n");
-                free(free_block);
-                return -1;
-            }
-            //debug("success.\n");
-            free(free_block);
-            debug("\t\tPulled off free block at index %d for writing.\n", new_data.index);
-            int written = write_data_to_block(new_data, offset, buf);
-            if (written < 0) {
-                // ERROR
-            } else {
-                if (offset >= BLOCKSIZE) {
-                    offset = offset - BLOCKSIZE;
-                } else {
-                    offset = 0;
-                }
-                debug("\t\tWrote %d bytes.\n", written);
-                total_bytes_written += written;
+                error("Error updating VCB on disk.\n");
             }
 
-            file->direct[i] = new_data;
-            if ((unsigned) total_bytes_written == strlen(buf)) {
-                return total_bytes_written;
+            db data;
+            for (int i = 0; i < BLOCKSIZE; i++) {
+                data.data[i] = '\0';
             }
-        } else {
-            if (offset == 0) {
-                // Start writing!
-            } else if ((unsigned int) offset < size) {
-                // Find where to start
-                if (offset < global_vcb.blocksize) {
-                    // We need to pad zeros in THIS block and then write the buf
-                } else {
-                    // We need to decrement the offset by one BLOCKSIZE and move to
-                    // the next block
-                    offset = offset - BLOCKSIZE;
-                    continue;
-                }
-            } else {
-                // Offset is greater than file size
-                // Pad offset - filesize zeros before writing the buffer
+            int written = write_data_to_block(&data, &offset, size, buf, total_bytes_written);
+            total_bytes_written += written;
+            debug_data(&data);
+            if (bwrite(data_loc.index, &data) < 0) {
+                error("Error writing new data to disk.\n");
+            }
+            blocks[i] = data_loc;
+            if (total_bytes_written == size) {
+                return total_bytes_written;
             }
         }
     }
@@ -1169,6 +1191,25 @@ int write_to_file(inode *file, const char *buf, size_t size, off_t offset) {
     return total_bytes_written;
 }
 
+int write_data_to_block(db *data, off_t *offset, int size, const char *buf, int buf_pos) {
+    int written = 0;
+    for (int i = 0; i < BLOCKSIZE && (written + buf_pos) < size; i++) {
+        if (*offset > 0) {
+            if (data->data[i] == '\0') {
+                data->data[i] = '0';
+            }
+            *offset = *offset - 1;
+            continue;
+        }
+
+        data->data[i] = buf[written+buf_pos];
+        written++;
+    }
+    debug("\tWrote %d bytes.\n", written);
+    return written;
+
+}
+/*
 int write_data_to_block(blocknum block, off_t offset, const char *buf) {
     int total_written = 0;
     db data;
@@ -1194,7 +1235,7 @@ int write_data_to_block(blocknum block, off_t offset, const char *buf) {
 
     return total_written;
 }
-
+*/
 /**
  * This function deletes the last component of the path (e.g., /a/b/c you 
  * need to remove the file 'c' from the directory /a/b).
