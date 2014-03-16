@@ -66,6 +66,9 @@ int read_from_file(inode *file, char *buf, size_t size, off_t offset);
 int read_from_block(blocknum block, off_t offset, char *buf, int buf_pos, size_t size);
 int get_file_attr(direntry entry, struct stat *stbuf);
 
+
+
+
 int search_root_for_file(const char *path, blocknum *dirent_loc, dirent *dir, int *entry_index);
 // Helper functions for dealing with dirents
 // int find_file_attr(dirent *dir, const char *path, struct stat *stbuf);

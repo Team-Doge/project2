@@ -45,15 +45,17 @@
 
 // Global variables
 static int const DIRECT_SIZE = 54;
-static int const INDIRECT_SIZE = 128;
+static int const INDIRECT_SIZE = 64;
 vcb global_vcb;
 dnode root;
 dirent root_dir;
 int read_files_in_dir(dirent *dir, void *buf, fuse_fill_dir_t filler);
-int create_file(dirent* dir, int dirent_index, int entry_index, const char *path, mode_t mode, struct fuse_file_info *fi);
-int create_dirent(dirent *dir, const char *path, mode_t mode, struct fuse_file_info *fi);
 
+int create_file(dirent *dir, blocknum dir_loc, int entry_index, const char *path, mode_t mode);
+int create_file_in_dirent(dirent *dir, blocknum dir_loc, const char *path, mode_t mode);
+int create_file_in_indirection(indirect *ind, blocknum ind_loc, const char *path, mode_t mode);
 
+int create_dirent(dirent *dir, const char *path, mode_t mode);
 /*
  * Initialize filesystem. Read in file system metadata and initialize
  * memory structures. If there are inconsistencies, now would also be
@@ -211,20 +213,17 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
 }
 
 int search_root_for_file(const char *path, blocknum *dirent_loc, dirent *dir, int *entry_index) {
-
-    for (int i = 0; i < DIRECT_SIZE; i++) {
-        bool found = find_file_entry(root.direct, DIRECT_SIZE, path, dirent_loc, dir, entry_index);
-        if (found == true) {
-            return 0;
-        }
+    bool found = false;
+    found = find_file_entry(root.direct, DIRECT_SIZE, path, dirent_loc, dir, entry_index);
+    if (found == true) {
+        return 0;
     }
-
 
     // ----- Step through the first layer of indirection ----- //
     if (root.single_indirect.valid == true) {
         debug("Searching single indirect.\n");
         indirect* ind = (indirect*) bread(root.single_indirect.index);
-        bool found = find_file_entry(ind->blocks, INDIRECT_SIZE, path, dirent_loc, dir, entry_index);
+        found = find_file_entry(ind->blocks, INDIRECT_SIZE, path, dirent_loc, dir, entry_index);
         if (found == true) {
             free(ind);
             return 1;
@@ -248,7 +247,7 @@ int search_root_for_file(const char *path, blocknum *dirent_loc, dirent *dir, in
 
             debug("Searching %d/%d single indirect inside double.\n", i+1, INDIRECT_SIZE);
             indirect* ind1 = (indirect*) bread(b2.index);
-            bool found = find_file_entry(ind1->blocks, INDIRECT_SIZE, path, dirent_loc, dir, entry_index);
+            found = find_file_entry(ind1->blocks, INDIRECT_SIZE, path, dirent_loc, dir, entry_index);
             if (found == true) {
                 free(ind1);
                 free(ind2);
@@ -500,7 +499,7 @@ int read_files_in_dir(dirent* dir, void *buf, fuse_fill_dir_t filler) {
  *
  */
 static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
-
+    fi = fi;
     // ----- Read the root dnode direct blocks to find entry space ----- //
     debug("In file creation.\n");
     for (int i = 0; i < DIRECT_SIZE; i++) {
@@ -516,7 +515,7 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 
             dirent dir;
 
-            int success = create_dirent(&dir, path, mode, fi);
+            int success = create_dirent(&dir, path, mode);
             if (success != 0) {
                 // Error
                 return success;
@@ -550,7 +549,7 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 
             // ----- Found a free spot for a new file ----- //
             if (entry.block.valid == false) {
-                int success = create_file(dir, b.index, j, path, mode, fi); 
+                int success = create_file(dir, b, j, path, mode); 
                 if (success != 0) {
                     debug("ERROR: Could not create file. Error code %d\n", success);
                 }
@@ -576,74 +575,16 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
     if (root.single_indirect.valid == true) {
         debug("\tReading in first layer of indirection.\n");
         indirect* ind = (indirect*) bread(root.single_indirect.index);
-
-        for (int i = 0; i < INDIRECT_SIZE; i++) {
-            debug("\tReading indirect block %d\n", i);
-            blocknum b = ind->blocks[i];
-            
-            // ----- This means we need to create a dirent ----- //
-            if (b.valid == false) {
-                debug("\tCreating new dirent block in indirection.\n");
-                blocknum dirent_block;
-                dirent_block.index = global_vcb.free.index;
-                dirent_block.valid = true;
-
-                dirent dir;
-
-                int success = create_dirent(&dir, path, mode, fi);
-                if (success != 0) {
-                    // Error
-                    free(ind);
-                    return success;
-                }
-
-                // ----- Write the updated indirect block to point to the new dirent ----- //
-                ind->blocks[i] = dirent_block;
-                debug("\tWriting indirect block to disk at index %d poiting to dirent at block %d.\n", root.single_indirect.index, dirent_block.index);
-                if (bwrite(root.single_indirect.index, ind) < 0) {
-                    debug("ERROR: Could not write updated single indirect to disk.\n");
-                    free(ind);
-                    return -1;
-                }
-                free(ind);
-                return 0;
-            }
-
-            // ----- Read in the block's data ----- //
-            dirent* dir = (dirent*) bread(b.index);
-
-            /*  Within the dirent, check each entry to see if the name matches
-                If there is a match, we error. Otherwise, loop through to find
-                an empty entry spot. If there is no empty spot (the loop finishes)
-                then loop through to the next direct block to read in the next
-                dirent block
-             */
-            for (int j = 0; j < 8; j++) {
-                direntry entry = dir->entries[j];
-
-                // ----- Found a free spot for a new file ----- //
-                if (entry.block.valid == false) {
-                    int success = create_file(dir, b.index, j, path, mode, fi); 
-                    if (success != 0) {
-                        debug("ERROR: Could not create file. Error code %d\n", success);
-                    }
-                    free(ind);
-                    return success;
-                }
-
-                /*   If there's no free space for creating a new file, we check
-                     to make sure that there isn't a file in this space with the
-                     same name before moving on to the next entry space
-                 */
-                char* name = entry.name;
-                if (strcmp(name, path+1) == 0) {
-                    debug("ERROR: Tried to create the same file.");
-                    free(ind);
-                    return -EEXIST;
-                }
-            }
+        int created = create_file_in_indirection(ind, root.single_indirect, path, mode);
+        if (created >= 0) {
+            // Success
+            free(ind);
+            return 0;
+        } else if (created == -EEXIST) {
+            free(ind);
+            return -EEXIST;
         }
-        free(ind);
+        // Fall through and try and create in the double
     } else {
         debug("Creating the first layer of indirection.\n");
         freeb* f = (freeb*) bread(global_vcb.free.index);
@@ -656,198 +597,251 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
             ind.blocks[i] = invalid_block;
         }
 
-        blocknum indirect_block;
-        indirect_block.valid = 1;
-        indirect_block.index = global_vcb.free.index;
-
-        // ----- Update the VCB's free block ----- //
-        debug("\tVCB's current free block index: %d\n", global_vcb.free.index);
+        blocknum ind_loc;
+        ind_loc.valid = true;
+        ind_loc.index = global_vcb.free.index;
         global_vcb.free = f->next;
-        debug("\tVCB's new free block index: %d\n", global_vcb.free.index);
 
-        // ----- Write the updated VCB to disk ----- //
-        debug("\tWriting the updated VCB to disk...");
+            // ----- Write the updated VCB to disk ----- //
         if (bwrite(0, &global_vcb) < 0) {
             debug("\n\n\tError updating VCB on disk.\n\n");
+        }
+
+        int created = create_file_in_indirection(&ind, ind_loc, path, mode);
+        if (created >= 0) {
+            root.single_indirect = ind_loc;
+            debug("Single indirect block on root.\n");
+            debug_block(&ind_loc);
+            // Write the updated root to disk
+            if (bwrite(1, &root) < 0) {
+                error("Error writing updated root to disk.\n");
+            }
             free(f);
-            return -1;
-        } else {
-            debug("success.\n");
-        }
-
-        root.single_indirect = indirect_block;
-        // Write the updated root to disk
-        debug("\tWriting the updated root with a single indirect...");
-        if (bwrite(1, &root) < 0) {
-            debug("\n\n\tError updating root dir on disk.\n\n");
-            return -1;
-        } else {
-            debug("success.\n");
-        }
-
-        // Create the dirent and file
-        blocknum dirent_block;
-        dirent_block.index = global_vcb.free.index;
-        dirent_block.valid = true;
-
-        dirent dir;
-
-        int success = create_dirent(&dir, path, mode, fi);
-        if (success != 0) {
-            // Error
+            return 0;
+        } else if (created == -EEXIST) {
             free(f);
-            return success;
+            return -EEXIST;
         }
-
-        // ----- Write the new indirect block to point to the new dirent ----- //
-        ind.blocks[0] = dirent_block;
-
-        if (bwrite(root.single_indirect.index, &ind) < 0) {
-            debug("ERROR: Could not write updated single indirect to disk.\n");
-            free(f);
-            return -1;
-        }
-        free(f);
-        return 0;
+        // Something went really wrong, but try and fall through to doublec
     }
 
     // Step through the double-layer indirection if there are more blocks
-    // if (root.double_indirect.valid == true) {
-    //     indirect* ind2 = (indirect*) bread(root.double_indirect.index);
+    if (root.double_indirect.valid == true) {
+        debug("Reading in second layer of indirection.\n");
+        indirect *double_ind = (indirect *) bread(root.double_indirect.index);
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            blocknum b = double_ind->blocks[i];
+            if (b.valid == true) {
+                // Try and create the file in this single indirect block
+                indirect *single = (indirect *) bread(b.index);
+                int created = create_file_in_indirection(single, b, path, mode);
+                if (created >= 0) {
+                    // Success
+                    return 0;
+                } else if (created == -EEXIST) {
+                    return -EEXIST;
+                }
+                // Fall through to next single indirect
+            } else {
+                // We need to create a new single indirect
+                indirect single;
+                blocknum invalid;
+                invalid.index = -1;
+                invalid.valid = false;
+                for (int j = 0; j < INDIRECT_SIZE; j++) {
+                    single.blocks[j] = invalid;
+                }
 
-    //     for (int i = 0; i < 128; i++) {
-    //         blocknum b2 = ind2->blocks[i];
+                blocknum single_loc;
+                single_loc.valid = true;
+                single_loc.index = global_vcb.free.index;
 
-    //         // ----- No more entries to read ----- //
-    //         if (b2.valid == false) {
-    //             debug("Double indirect block %d was invalid.\n", i);
-    //             return 0;
-    //         }
+                freeb *f = (freeb *) bread(global_vcb.free.index);
+                global_vcb.free = f->next;
+                if (bwrite(0, &global_vcb) < 0) {
+                    error("Error writing updated VCB to disk.\n");
+                }
 
-    //         // ----- Go throught the single indirection ----- //
-    //         indirect* ind1 = (indirect*) bread(b2.index);
-    //         for (int j = 0; j < 128; j++) {
-    //             blocknum b = ind1->blocks[j];
+                int created = create_file_in_indirection(&single, single_loc, path, mode);
+                if (created >= 0) {
+                    // Write the update double to disk
+                    double_ind->blocks[i] = single_loc; 
+                    if (bwrite(root.double_indirect.index, double_ind) < 0) {
+                        error("Error writing updated double indirect to disk.\n");
+                    }
+                }
+                return created;
+            }
+        }
+        // Fell through the loop, which means there are no more double indirect
+        // blocks. We're out of space.
+    } else {
+        // Create the indirection
+        blocknum invalid_block;
+        invalid_block.index = -1;
+        invalid_block.valid = false;
 
-    //             // ----- This means we need to create a dirent ----- //
-    //             if (b.valid == false) {
-    //                 blocknum dirent_block;
-    //                 dirent_block.index = global_vcb.free.index;
-    //                 dirent_block.valid = true;
+        debug("Creating the second layer of indirection.\n");
+        indirect double_ind;
+        blocknum double_loc;
+        double_loc.index = global_vcb.free.index;
+        double_loc.valid = true;
+        freeb* double_free = (freeb*) bread(global_vcb.free.index);
+        global_vcb.free = double_free->next;
 
-    //                 dirent dir;
+        // Initialize with empty blocks
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            double_ind.blocks[i] = invalid_block;
+        }
 
-    //                 int success = create_dirent(&dir, path, mode, fi);
-    //                 if (success != 0) {
-    //                     // Error
-    //                     return success;
-    //                 }
+        debug("Creating the first single indirection block for double indirection.\n");
+        indirect single_ind;
+        blocknum single_loc;
+        single_loc.index = global_vcb.free.index;
+        single_loc.valid = true;
+        freeb* single_free = (freeb *) bread(global_vcb.free.index);
+        global_vcb.free = single_free->next;
 
-    //                 // ----- Rewrite the dnode to contain the new dirent ----- //
-                    
-    //                 root.direct[i] = dirent_block;
+        // Initialize with empty blocks
+        for (int i = 0; i < INDIRECT_SIZE; i++) {
+            single_ind.blocks[i] = invalid_block;
+        }
 
-    //                 char root_tmp[BLOCKSIZE];
-    //                 memcpy(root_tmp, &root, BLOCKSIZE);
-    //                 if (bwrite(1, &root) < 0) {
-    //                     debug("ERROR: Could not rewrite root dnode to disk.\n");
-    //                     return -1;
-    //                 }
+        // Set the first single indirect in double
+        double_ind.blocks[0] = single_loc;
 
-    //                 return 0;
-    //             }
+        // Write the updated VCB to disk
+        if (bwrite(0, &global_vcb) < 0) {
+            error("Error updating the free block on the VCB on disk.\n");
+        }
 
-    //             // ----- Read in the block's data ----- //
-    //             dirent* dir = (dirent*) bread(b.index);
+        int created = create_file_in_indirection(&single_ind, single_loc, path, mode);
+        if (created >= 0) {
+            // Success
+            // Write the doduble indirect to disk
+            if (bwrite(double_loc.index, &double_ind) < 0) {
+                error("Error writing double indirect block to disk.\n");
+            }
 
-    //             /*  Within the dirent, check each entry to see if the name matches
-    //                 If there is a match, we error. Otherwise, loop through to find
-    //                 an empty entry spot. If there is no empty spot (the loop finishes)
-    //                 then loop through to the next direct block to read in the next
-    //                 dirent block
-    //              */
-    //             for (int j = 0; j < 8; j++) {
-    //                 direntry entry = dir->entries[j];
+            // Write the single indirect to disk
+            if (bwrite(single_loc.index, &single_ind) < 0) {
+                error("Error writing single indirect block to disk.\n");
+            }
 
-    //                 // ----- Found a free spot for a new file ----- //
-    //                 if (entry.block.valid == false) {
-    //                     int success = create_file(dir, b.index, j, path, mode, fi); 
-    //                     if (success != 0) {
-    //                         debug("ERROR: Could not create file. Error code %d\n", success);
-    //                     }
+            root.double_indirect = double_loc;
+            // Write the updated root to disk
+            if (bwrite(1, &root) < 0) {
+                error("Error writing updated root to disk.\n");
+            }
 
-    //                     return success;
-    //                 }
+            free(single_free);
+            free(double_free);
+            return 0;
+        } else {
+            error("Error creating file in double indirect.\n");
+            free(single_free);
+            free(double_free);
+            return created;
+        }
 
-    //                 /*   If there's no free space for creating a new file, we check
-    //                      to make sure that there isn't a file in this space with the
-    //                      same name before moving on to the next entry space
-    //                  */
-    //                 char* name = entry.name;
-    //                 if (strcmp(name, path+1) == 0) {
-    //                     debug("ERROR: Tried to create the same file.");
-    //                     return -EEXIST;
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
-    return 0;
+    }
+    return -ENOSPC;
 }
 
-int create_file(dirent* dir, int dirent_index, int entry_index, const char *path, mode_t mode, struct fuse_file_info *fi) {
-    debug("Creating new file.\n");
-    // Get rid of compiler warnings of unused parameters
-    fi = fi + 0;
-    mode = mode + 0;
+int create_file_in_indirection(indirect *ind, blocknum indirect_loc, const char *path, mode_t mode) {
 
-    // ----- Get the index of the first free block ----- //
-    int free_block_index = global_vcb.free.index;
+    for (int i = 0; i < INDIRECT_SIZE; i++) {
+        blocknum b = ind->blocks[i];
+        if (b.valid == true) {
+            // See if there's room
+            dirent *dir = (dirent *) bread(b.index);
 
-    // ----- Read the free block into memory so we can update for the next one ----- //
-    debug("\tReading in free block at %d\n", free_block_index);
-    freeb* free_block = (freeb*) bread(free_block_index);
+            // Only creates if there is enough space in the dirent
+            int file_created = create_file_in_dirent(dir, b, path, mode);
 
-    // ----- Update the VCB's free block ----- //
-    debug("\tVCB's current free block index: %d\n", global_vcb.free.index);
-    global_vcb.free = free_block->next;
-    debug("\tVCB's new free block index: %d\n", global_vcb.free.index);
+            if (file_created >= 0) {
+                free(dir);
+                return file_created;
 
-    // ----- Write the updated VCB to disk ----- //
-    debug("\tWriting the updated VCB to disk...");
-    if (bwrite(0, &global_vcb) < 0) {
-        debug("\n\n\tError updating VCB on disk.\n\n");
-        free(free_block);
-        return -1;
-    } else {
-        debug("success.\n");
+            } else if (file_created == -EEXIST) {
+                return -EEXIST;
+            }
+            // Otherwise fall through to the next dirent
+
+        } else {
+            // Pull off the free block for it
+            blocknum dir_loc;
+            dir_loc.index = global_vcb.free.index;
+            dir_loc.valid = true;
+            freeb *f = (freeb *) bread(global_vcb.free.index);
+            global_vcb.free = f->next;
+
+            // Write the updated VCB to disk
+            if (bwrite(0, &global_vcb) < 0) {
+                error("Error updating the free block on the VCB on disk.\n");
+            }
+
+            // Make a new dirent
+            dirent dir;
+
+            // Empty entry
+            direntry empty_entry;
+            strncpy(empty_entry.name, "", 55);
+            empty_entry.type = ' ';
+            empty_entry.block.valid = false;
+            empty_entry.block.index = -1;
+
+            // Fill the new direnbt with empty entries
+            for (int i = 0; i < 8; i++) {
+                dir.entries[i] = empty_entry;
+            }
+            int file_created = create_file_in_dirent(&dir, dir_loc, path, mode);
+            ind->blocks[i] = dir_loc;
+            // Write the updated indirect block to disk
+            if (bwrite(indirect_loc.index, ind) < 0) {
+                error("Error updating indirect block.\n");
+            }
+
+
+            debug("Created new dirent with file in indirection.\n");
+            debug_block(&dir_loc);
+            debug_dirent(&dir);
+            free(f);
+            return file_created;
+        }
     }
 
-    // ----- Create a new entry for the file ----- //
-    blocknum entry_blocknum;
-    entry_blocknum.index = free_block_index;
-    entry_blocknum.valid = true;
+    return -1;
+}
 
-    direntry new_file_entry;
-    strncpy(new_file_entry.name, path+1, 54);
-    new_file_entry.name[54] = '\0'; // Terminate name with null byte
-    new_file_entry.type = 'f';
-    new_file_entry.block = entry_blocknum;
-    new_file_entry.block.valid = true;
-    debug("\tNew file name: %s\n", new_file_entry.name);
-
-    // ----- Update the dirent with the new entry ----- //
-    dir->entries[entry_index] = new_file_entry;
-
-    // ----- Write the updated dirent to disk ----- //
-    debug("\tWriting dirent to block %d\n", dirent_index);
-    if (bwrite(dirent_index, dir) < 0) {
-        debug("ERROR: Could not write updated dirent");
+int create_file_in_dirent(dirent *dir, blocknum dir_loc, const char *path, mode_t mode) {
+    
+    for (int i = 0; i < 8; i++) {
+        direntry entry = dir->entries[i];
+        if (entry.block.valid == false) {
+            // Create file
+            int created = create_file(dir, dir_loc, i, path, mode);
+            if (created) {
+                return 0;
+            } else {
+                error("Error creating file.\n");
+                return created;
+            }
+        } else {
+            // Something exists here, make sure we're not creating the same file
+            if (strncmp(path, entry.name, 55) == 0) {
+                return -EEXIST;
+            }
+        }
     }
 
-    // ----- Set the file's stats ----- //
-    inode new_file;
+    return -1;
+}
+
+int create_file(dirent *dir, blocknum dir_loc, int entry_index, const char *path, mode_t mode) {
+    debug("Creating file in dirent:\n");
+    debug_dirent(dir);
+    // Time is annoying
     struct timespec current_time;
     struct timeval ctval;
     if (gettimeofday(&ctval, NULL) != 0) {
@@ -856,37 +850,67 @@ int create_file(dirent* dir, int dirent_index, int entry_index, const char *path
     current_time.tv_sec = ctval.tv_sec;
     current_time.tv_nsec = ctval.tv_usec * 1000;
 
-    // if ((clock_gettime(CLOCK_REALTIME, &current_time)) != 0) {
-    //     printf("ERROR: Cannot get time. \n");
-    // }
-    new_file.access_time = current_time;
-    new_file.modify_time = current_time;
-    new_file.create_time = current_time;
-    new_file.size = 0;
-    new_file.user = getuid();
-    new_file.group = getgid();
-    new_file.mode = 0644;
+    // Create the inode
+    debug("Creating file inode.\n");
+    inode file;
+    file.access_time = current_time;
+    file.modify_time = current_time;
+    file.create_time = current_time;
+    file.size = 0;
+    file.user = getuid();
+    file.group = getgid();
+    file.mode = mode;
 
-    blocknum invalid_block;
-    invalid_block.index = -1;
-    invalid_block.valid = false;
+    // Setup the file location
+    blocknum file_loc;
+    file_loc.index = global_vcb.free.index;
+    file_loc.valid = true;
 
-    for (int k = 0; k < DIRECT_SIZE; k++) {
-        new_file.direct[k] = invalid_block;
+    // Pop off a free block
+    freeb *f = (freeb *) bread(global_vcb.free.index);
+    global_vcb.free = f->next;
+    if (bwrite(0, &global_vcb) < 0) {
+        error("Error updating VCB free block when creating file.\n");
+        free(f);
+        return -1;
     }
-
-    // ----- Write the new file stats to disk ----- //
-    if (bwrite(free_block_index, &new_file) < 0) {
-        debug("Error writing file to disk at block %d\n", free_block_index);
+    debug("Updated VCB free block to %d.\n", global_vcb.free.index);
+    // Write the file to disk
+    if (bwrite(file_loc.index, &file) < 0) {
+        error("Error writing file to disk.\n");
+        free(f);
+        return -1;
     }
-    free(free_block);
+    debug("Wrote file inode to %d.\n", file_loc.index);
+
+    // Make the entry
+    direntry entry;
+    strncpy(entry.name, path+1, 55);
+    // Make sure the name ends with a null byte
+    entry.name[54] = '\0';
+    entry.type = 'f';
+    entry.block = file_loc;
+
+    // Add the entry to the dirent
+    dir->entries[entry_index] = entry;
+
+    // Write the updated dir to disk
+    if (bwrite(dir_loc.index, dir) < 0) {
+        error("Could not update dirent on disk.\n");
+    }
+    // Successfully created file
+    free(f);
     return 0;
+
 }
 
-int create_dirent(dirent *dir, const char *path, mode_t mode, struct fuse_file_info *fi) {
+int create_dirent(dirent *dir, const char *path, mode_t mode) {
     debug("Creating a new dirent.\n");
     // ----- Get the index of the first free block ----- //
+    blocknum dir_loc;
     int free_block_index = global_vcb.free.index;
+    dir_loc.index = free_block_index;
+    dir_loc.valid = 1;
 
     // ----- Make sure there is enough memory for creating files ----- //
     if (global_vcb.free.valid == true) {
@@ -929,7 +953,7 @@ int create_dirent(dirent *dir, const char *path, mode_t mode, struct fuse_file_i
     }
 
     // ----- Create a new file using the new dirent ----- //
-    int success = create_file(dir, free_block_index, 0, path, mode, fi); 
+    int success = create_file(dir, dir_loc, 0, path, mode); 
     if (success != 0) {
         debug("ERROR: Could not create file. Error code %d\n", success);
         free(free_block);

@@ -61,7 +61,7 @@ typedef struct free_t {
  *     double indirection, each blocknum points to a single indirection.
  */
 typedef struct indirect_t {
-    blocknum blocks[128];
+    blocknum blocks[64];
 } indirect;
 
 
