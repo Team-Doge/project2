@@ -2,8 +2,7 @@ We are choosing to implement the inode file system, as it poses a challenge and 
 
 To test file creation, run the create_files.py script found in this directory. It will attempt to make 2500 files. 
 
-Currently, reading and writing data is somewhat supported, and is a work in progress
-
+Currently, our filesystem is successful when tested for a single-level directory.  
 
 To run the code:
 
@@ -20,7 +19,7 @@ disk, but you'll add code to 3600mkfs.c to make it write out the data structures
 that your filesystem will use).  Finally, you'll attach your disk to the
 real filesystem by running
 
-./3600fs -d fuse-dir
+./3600fs -s -d fuse-dir
 
 This will make your disk appear mounted at the local fuse-dir directory (the
 actual directory and its contents will be hidden as long as your process
