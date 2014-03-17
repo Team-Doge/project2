@@ -123,7 +123,7 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
         printf("Block size: %d\n", global_vcb.blocksize);
         printf("Root:\n\tBlock: %d\n\tvalid: %d\n", global_vcb.root.index, global_vcb.root.valid);
         printf("Free:\n\tBlock: %d\n\tvalid: %d\n", global_vcb.free.index, global_vcb.free.valid);
-	    printf("Disk name: %s\n", global_vcb.name);
+        printf("Disk name: %s\n", global_vcb.name);
         printf("\n\n*** ROOT INFO ***\n");
         printf("User id: %d\n", root.user);
         printf("Group id: %d\n", root.group);
@@ -224,11 +224,9 @@ int search_root_for_file(const char *path, blocknum *dirent_loc, dirent *dir, in
         debug("Searching single indirect.\n");
         indirect* ind = (indirect*) bread(root.single_indirect.index);
         found = find_file_entry(ind->blocks, INDIRECT_SIZE, path, dirent_loc, dir, entry_index);
+        free(ind);
         if (found == true) {
-            free(ind);
             return 1;
-        } else {
-            free(ind);
         }
     }
 
@@ -248,12 +246,10 @@ int search_root_for_file(const char *path, blocknum *dirent_loc, dirent *dir, in
             debug("Searching %d/%d single indirect inside double.\n", i+1, INDIRECT_SIZE);
             indirect* ind1 = (indirect*) bread(b2.index);
             found = find_file_entry(ind1->blocks, INDIRECT_SIZE, path, dirent_loc, dir, entry_index);
+            free(ind1);
             if (found == true) {
-                free(ind1);
                 free(ind2);
                 return 2;
-            } else {
-                free(ind1);
             }
         }
         free(ind2);
@@ -357,7 +353,7 @@ int get_file_attr(direntry entry, struct stat *stbuf) {
  * @return 1 if buffer is full, zero otherwise
  * typedef int (*fuse_fill_dir_t) (void *buf, const char *name,
  *                                 const struct stat *stbuf, off_t off);
- *			   
+ *             
  * Your solution should not need to touch fi
  *
  */
@@ -392,11 +388,9 @@ static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         // ----- Read in all entries in the dirent ----- //
         dirent* dir = (dirent*) bread(b.index);
         int success = read_files_in_dir(dir, buf, filler);
+        free(dir);
         if (success < 0) {
-            free(dir);
             return -1;
-        } else {
-            free(dir);
         }
     }
 
@@ -417,13 +411,12 @@ static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
             // ----- Read in all entries in the dirent ----- //
             dirent* dir = (dirent*) bread(b.index);
             int success = read_files_in_dir(dir, buf, filler);
+            free(dir);
             if (success < 0) {
-                free(dir);
                 return -1;
-            } else {
-                free(dir);
             }
         }
+        free(ind);
     }
 
     // Step through the double-layer indirection if there are more blocks
@@ -576,12 +569,11 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
         debug("\tReading in first layer of indirection.\n");
         indirect* ind = (indirect*) bread(root.single_indirect.index);
         int created = create_file_in_indirection(ind, root.single_indirect, path, mode);
+        free(ind);
         if (created >= 0) {
             // Success
-            free(ind);
             return 0;
         } else if (created == -EEXIST) {
-            free(ind);
             return -EEXIST;
         }
         // Fall through and try and create in the double
@@ -606,7 +598,7 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
         if (bwrite(0, &global_vcb) < 0) {
             debug("\n\n\tError updating VCB on disk.\n\n");
         }
-
+        free(f);
         int created = create_file_in_indirection(&ind, ind_loc, path, mode);
         if (created >= 0) {
             root.single_indirect = ind_loc;
@@ -616,13 +608,11 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
             if (bwrite(1, &root) < 0) {
                 error("Error writing updated root to disk.\n");
             }
-            free(f);
             return 0;
         } else if (created == -EEXIST) {
-            free(f);
             return -EEXIST;
         }
-        // Something went really wrong, but try and fall through to doublec
+        // Something went really wrong, but try and fall through to double
     }
 
     // Step through the double-layer indirection if there are more blocks
@@ -635,10 +625,13 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
                 // Try and create the file in this single indirect block
                 indirect *single = (indirect *) bread(b.index);
                 int created = create_file_in_indirection(single, b, path, mode);
+                free(single);
                 if (created >= 0) {
                     // Success
+                    free(double_ind);
                     return 0;
                 } else if (created == -EEXIST) {
+                    free(double_ind);
                     return -EEXIST;
                 }
                 // Fall through to next single indirect
@@ -661,7 +654,7 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
                 if (bwrite(0, &global_vcb) < 0) {
                     error("Error writing updated VCB to disk.\n");
                 }
-
+                free(f);
                 int created = create_file_in_indirection(&single, single_loc, path, mode);
                 if (created >= 0) {
                     // Write the update double to disk
@@ -670,9 +663,11 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
                         error("Error writing updated double indirect to disk.\n");
                     }
                 }
+                free(double_ind);
                 return created;
             }
         }
+        free(double_ind);
         // Fell through the loop, which means there are no more double indirect
         // blocks. We're out of space.
     } else {
@@ -714,6 +709,8 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
         if (bwrite(0, &global_vcb) < 0) {
             error("Error updating the free block on the VCB on disk.\n");
         }
+        free(double_free);
+        free(single_free);
 
         int created = create_file_in_indirection(&single_ind, single_loc, path, mode);
         if (created >= 0) {
@@ -734,13 +731,9 @@ static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
                 error("Error writing updated root to disk.\n");
             }
 
-            free(single_free);
-            free(double_free);
             return 0;
         } else {
             error("Error creating file in double indirect.\n");
-            free(single_free);
-            free(double_free);
             return created;
         }
 
@@ -758,9 +751,8 @@ int create_file_in_indirection(indirect *ind, blocknum indirect_loc, const char 
 
             // Only creates if there is enough space in the dirent
             int file_created = create_file_in_dirent(dir, b, path, mode);
-
+            free(dir);
             if (file_created >= 0) {
-                free(dir);
                 return file_created;
 
             } else if (file_created == -EEXIST) {
@@ -780,6 +772,7 @@ int create_file_in_indirection(indirect *ind, blocknum indirect_loc, const char 
             if (bwrite(0, &global_vcb) < 0) {
                 error("Error updating the free block on the VCB on disk.\n");
             }
+            free(f);
 
             // Make a new dirent
             dirent dir;
@@ -806,7 +799,6 @@ int create_file_in_indirection(indirect *ind, blocknum indirect_loc, const char 
             debug("Created new dirent with file in indirection.\n");
             debug_block(&dir_loc);
             debug_dirent(&dir);
-            free(f);
             return file_created;
         }
     }
@@ -884,7 +876,9 @@ int create_file(dirent *dir, blocknum dir_loc, int entry_index, const char *path
         free(f);
         return -1;
     }
+    free(f);
     debug("Updated VCB free block to %d.\n", global_vcb.free.index);
+
     // Write the file to disk
     if (bwrite(file_loc.index, &file) < 0) {
         error("Error writing file to disk.\n");
@@ -909,7 +903,6 @@ int create_file(dirent *dir, blocknum dir_loc, int entry_index, const char *path
         error("Could not update dirent on disk.\n");
     }
     // Successfully created file
-    free(f);
     return 0;
 
 }
@@ -941,6 +934,8 @@ int create_dirent(dirent *dir, const char *path, mode_t mode) {
         return -1;
     }
     debug("success.\n");
+    free(free_block);
+
 
     // ----- Fill the new dirent with empty entries ----- //
 
@@ -966,10 +961,8 @@ int create_dirent(dirent *dir, const char *path, mode_t mode) {
     int success = create_file(dir, dir_loc, 0, path, mode); 
     if (success != 0) {
         debug("ERROR: Could not create file. Error code %d\n", success);
-        free(free_block);
         return success;
     }
-    free(free_block);
     return 0;
 }
 /*
@@ -1000,6 +993,7 @@ static int vfs_read(const char *path, char *buf, size_t size, off_t offset,
         blocknum file_loc = dir.entries[entry_index].block;
         inode *file = (inode *) bread(file_loc.index);
         int read = read_from_file(file, buf, size, offset);
+        free(file);
         return read;
     }
 
@@ -1029,7 +1023,7 @@ int read_from_file(inode *file, char *buf, size_t size, off_t offset) {
 
     // Double indirection
     if (file->double_indirect.valid == true) {
-        indirect *double_ind = (indirect *) bread(file->double_indirect.index) ;
+        indirect *double_ind = (indirect *) bread(file->double_indirect.index);
         for (int i = 0; i < INDIRECT_SIZE; i++) {
             blocknum b = double_ind->blocks[i];
             if (b.valid == true) {
@@ -1039,10 +1033,12 @@ int read_from_file(inode *file, char *buf, size_t size, off_t offset) {
                 free(single_ind);
                 total_bytes_read += single_read;
                 if ((unsigned) total_bytes_read == size) {
+                    free(double_ind);
                     return total_bytes_read;
                 }
             }
         }
+        free(double_ind);
     }
 
     return total_bytes_read;
@@ -1051,7 +1047,7 @@ int read_from_file(inode *file, char *buf, size_t size, off_t offset) {
 int read_from_block_list(blocknum *blocks, int list_size, off_t *offset, char *buf, int buf_pos, size_t size) {
     int total_bytes_read = 0;
     for (int i = 0; i < list_size; i++) {
-        debug("Reading data block %d/%d.\n", i+1, list_size);
+        // debug("Reading data block %d/%d.\n", i+1, list_size);
         blocknum b = blocks[i];
         if (b.valid == false) {
             // Nothing more to read
@@ -1059,7 +1055,7 @@ int read_from_block_list(blocknum *blocks, int list_size, off_t *offset, char *b
         }
         int read = read_from_block(b, offset, buf, buf_pos + total_bytes_read, size);
         total_bytes_read += read;
-        if ((unsigned) total_bytes_read == size) {
+        if ((unsigned) (total_bytes_read + buf_pos) == size) {
             return total_bytes_read;
         }
     }
@@ -1117,7 +1113,7 @@ static int vfs_write(const char *path, const char *buf, size_t size,
         blocknum file_loc = dir.entries[entry_index].block;
         inode *file = (inode *) bread(file_loc.index);
         int total = write_to_file(file, buf, size, offset);
-
+        free(file);
         // Update file size
         if (offset + total > file->size) {
             file->size = file->size + ((offset + total) - file->size);
@@ -1181,6 +1177,9 @@ int write_to_file(inode *file, const char *buf, size_t size, off_t offset) {
         int written = write_data_to_block_list(single.blocks, INDIRECT_SIZE, size, &offset, buf, total_bytes_written);
         single_written += written;
         file->single_indirect = single_loc;
+        if (bwrite(single_loc.index, &single) < 0) {
+            error("Error creating new indirect on disk.\n");
+        }
         free(f);
     }
     if (single_written < 0) {
@@ -1204,6 +1203,7 @@ int write_to_file(inode *file, const char *buf, size_t size, off_t offset) {
                 free(single_ind);
                 if (written < 0) {
                     // Ran out of space or error
+                    free(double_ind);
                     return written;
                 }
                 double_written += written;
@@ -1228,12 +1228,16 @@ int write_to_file(inode *file, const char *buf, size_t size, off_t offset) {
                 int written = write_data_to_block_list(single.blocks, INDIRECT_SIZE, size, &offset, buf, total_bytes_written + double_written);
                 free(f);
                 double_ind->blocks[i] = single_loc;
+                if (bwrite(single_loc.index, &single) < 0) {
+                    error("Error creating new indirect on disk.\n");
+                }
                 if (written < 0) {
                     // Ran out of space or error
                     // Save the double to disk first because of the new single
                     if (bwrite(file->double_indirect.index, double_ind) < 0) {
                         error("Error updating double indirect on disk.\n");
                     }
+                    free(double_ind);
                     return written;
                 } else if ((unsigned) (total_bytes_written + double_written + written) == size) {
                     // We're done writing
@@ -1241,12 +1245,14 @@ int write_to_file(inode *file, const char *buf, size_t size, off_t offset) {
                     if (bwrite(file->double_indirect.index, double_ind) < 0) {
                         error("Error updating double indirect on disk.\n");
                     }
+                    free(double_ind);
                     return total_bytes_written + double_written + written;
                 }
                 double_written += written;
 
             }
         }
+        free(double_ind);
     } else {
         // Create the second indirect location
         blocknum double_loc;
@@ -1257,6 +1263,7 @@ int write_to_file(inode *file, const char *buf, size_t size, off_t offset) {
         if (bwrite(0, &global_vcb) < 0) {
             error("Error writing updated VCB to disk.\n");
         }
+        free(double_free);
         file->double_indirect = double_loc;
 
         // Create the second indirect block with invalid blocks
@@ -1267,6 +1274,7 @@ int write_to_file(inode *file, const char *buf, size_t size, off_t offset) {
 
         // Writing data to the double indirect
         for (int i = 0; i < INDIRECT_SIZE; i++) {
+            debug("Writing to single indirect %d/%d in double indirect.\n", i+1, INDIRECT_SIZE);
             // Create a single indirect
             blocknum single_loc;
             single_loc.index = global_vcb.free.index;
@@ -1276,7 +1284,7 @@ int write_to_file(inode *file, const char *buf, size_t size, off_t offset) {
             if (bwrite(0, &global_vcb) < 0) {
                 error("Error writing updated VCB to disk.\n");
             }
-
+            free(f);
             blocknum invalid;
             invalid.index = -1;
             invalid.valid = false;
@@ -1285,8 +1293,10 @@ int write_to_file(inode *file, const char *buf, size_t size, off_t offset) {
                 single.blocks[i] = invalid;
             }
             int written = write_data_to_block_list(single.blocks, INDIRECT_SIZE, size, &offset, buf, total_bytes_written + double_written);
-            free(f);
             double_ind.blocks[i] = single_loc;
+            if (bwrite(single_loc.index, &single) < 0) {
+                error("Error creating new indirect on disk.\n");
+            }
             if (written < 0) {
                 // Ran out of space or error
                 // Save the double to disk first because of the new single
@@ -1313,13 +1323,13 @@ int write_data_to_block_list(blocknum *blocks, int list_size, int size, off_t *o
     int total_bytes_written = 0;
     debug("Writing to a potential %d blocks for file.\n", list_size);
     for (int i = 0; i < list_size; i++) {
-        debug("\tWriting to block %d/%d.\n", i+1, list_size);
         blocknum b = blocks[i];
         if (b.valid == true) {
             // Write data to existing block
             db *data = (db *) bread(b.index);
             size_t data_size = strnlen(data->data, BLOCKSIZE);
             if (data_size < (unsigned) BLOCKSIZE) {
+                debug("\tWriting to existing block %d/%d.\n", i+1, list_size);
                 int written = write_data_to_block(data, offset, size, buf, total_bytes_written + buf_pos);
                 total_bytes_written += written;
 
@@ -1338,7 +1348,7 @@ int write_data_to_block_list(blocknum *blocks, int list_size, int size, off_t *o
             } 
             free(data);
         } else {
-
+            debug("Making new data block for file at %d/%d.\n", i+1, list_size);
             // Make sure there's space for more data
             if (global_vcb.free.valid == true) {
                 return -ENOSPC;
@@ -1350,10 +1360,10 @@ int write_data_to_block_list(blocknum *blocks, int list_size, int size, off_t *o
             data_loc.index = global_vcb.free.index;
             freeb *f = (freeb *) bread(global_vcb.free.index);
             global_vcb.free = f->next;
-            free(f);
             if (bwrite(0, &global_vcb) < 0) {
                 error("Error updating VCB on disk.\n");
             }
+            free(f);
 
             db data;
             for (int i = 0; i < BLOCKSIZE; i++) {
@@ -1361,7 +1371,10 @@ int write_data_to_block_list(blocknum *blocks, int list_size, int size, off_t *o
             }
             int written = write_data_to_block(&data, offset, size, buf, total_bytes_written + buf_pos);
             total_bytes_written += written;
-            debug_data(&data);
+            if (written > 0) {
+                // debug_data(&data);
+            }
+            printf("\n");
             if (bwrite(data_loc.index, &data) < 0) {
                 error("Error writing new data to disk.\n");
             }
@@ -1380,7 +1393,7 @@ int write_data_to_block(db *data, off_t *offset, int size, const char *buf, int 
     for (int i = 0; i < BLOCKSIZE && (written + buf_pos) < size; i++) {
         if (*offset > 0) {
             if (data->data[i] == '\0') {
-                data->data[i] = '0';
+                data->data[i] = '\0';
             }
             *offset = *offset - 1;
             continue;
@@ -1424,7 +1437,8 @@ static int vfs_delete(const char *path)
         add_block_list_to_free_list(file->direct, DIRECT_SIZE);
         if (file->single_indirect.valid) {
             indirect *single = (indirect *) bread(file->single_indirect.index);
-            add_block_list_to_free_list(single->blocks, INDIRECT_SIZE);            
+            add_block_list_to_free_list(single->blocks, INDIRECT_SIZE);   
+            free(single);         
         }
         if (file->double_indirect.valid) {
             indirect *double_ind = (indirect *) bread(file->double_indirect.index);
@@ -1433,12 +1447,14 @@ static int vfs_delete(const char *path)
                 if (b.valid == true) {
                     indirect *single_ind = (indirect *) bread(b.index);
                     add_block_list_to_free_list(single_ind->blocks, INDIRECT_SIZE);
+                    free(single_ind);
                 }
             }
+            free(double_ind);
         }
 
         add_block_to_free_list(dir.entries[entry_index].block);
-
+        free(file);
         return 0;
     }
 
@@ -1529,9 +1545,10 @@ static int vfs_chmod(const char *file, mode_t mode)
         if (bwrite(file_loc.index, file) < 0) {
             // Error writing to disk
             error("Error writing modified permissions for file to disk.\n");
+            free(file);
             return -1;
         }
-
+        free(file);
         return 0;
     }
 
@@ -1561,9 +1578,10 @@ static int vfs_chown(const char *file, uid_t uid, gid_t gid)
         if (bwrite(file_loc.index, file) < 0) {
             // Error writing to disk
             error("Error writing modified owners for file to disk.\n");
+            free(file);
             return -1;
         }
-
+        free(file);
         return 0;
     }
 
@@ -1593,9 +1611,10 @@ static int vfs_utimens(const char *file, const struct timespec ts[2])
         if (bwrite(file_loc.index, file) < 0) {
             // Error writing to disk
             error("Error writing modified permissions for file to disk.\n");
+            free(file);
             return -1;
         }
-
+        free(file);
         return 0;
     }
 
@@ -1627,9 +1646,10 @@ static int vfs_truncate(const char *file, off_t offset)
         if (bwrite(file_loc.index, f) < 0) {
             // Error writing to disk
             error("Error writing modified permissions for file to disk.\n");
+            free(f);
             return -1;
         }
-
+        free(f);
         return 0;
     }
 
@@ -1699,7 +1719,7 @@ void truncate_file(inode *file, off_t offset) {
                         }
                     } else {
                         // Invalid blocks, no more data
-                        return;
+                        break;
                     }
                 }
                 if (bwrite(b.index, single_ind) < 0) {
@@ -1719,22 +1739,22 @@ void truncate_file(inode *file, off_t offset) {
  * NOTE: If you're supporting multiple directories for extra credit,
  * you should add 
  *
- *     .mkdir	 = vfs_mkdir,
+ *     .mkdir    = vfs_mkdir,
  */
 static struct fuse_operations vfs_oper = {
     .init    = vfs_mount,
     .destroy = vfs_unmount,
     .getattr = vfs_getattr,
     .readdir = vfs_readdir,
-    .create	 = vfs_create,
-    .read	 = vfs_read,
-    .write	 = vfs_write,
-    .unlink	 = vfs_delete,
-    .rename	 = vfs_rename,
-    .chmod	 = vfs_chmod,
-    .chown	 = vfs_chown,
-    .utimens	 = vfs_utimens,
-    .truncate	 = vfs_truncate,
+    .create  = vfs_create,
+    .read    = vfs_read,
+    .write   = vfs_write,
+    .unlink  = vfs_delete,
+    .rename  = vfs_rename,
+    .chmod   = vfs_chmod,
+    .chown   = vfs_chown,
+    .utimens     = vfs_utimens,
+    .truncate    = vfs_truncate,
 };
 
 int main(int argc, char *argv[]) {
